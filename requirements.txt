@@ -1,0 +1,9 @@
+torch
+diffusers
+transformers
+accelerate
+xformers
+pandas
+matplotlib
+tqdm
+einops
