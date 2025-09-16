@@ -150,7 +150,7 @@ def run_srds_diffusion(
             latents=initial_latents,
         )
 
-        save_images_as_grid(coarse_output.images, f"{output_dir}/srds_ddim_course.png")
+        save_images_as_grid(coarse_output.images, f"{output_dir}/srds_ddim_coarse.png")
 
         initialized_images = decode_latents_to_pil(
             prev_latents[-len(prompts) :], pipe_coarse
@@ -242,10 +242,11 @@ def run_srds_diffusion(
 
         # Check convergence (line 13-14 of Algorithm 1)
         if prev_iter_images is not None:
+            
             l1_distance = np.average(
                 np.abs(
-                    np.array(prev_iter_images, dtype=np.float32)
-                    - np.array(images, dtype=np.float32)
+                    np.array(prev_iter_images[0], dtype=np.float32)
+                    - np.array(images[0], dtype=np.float32)
                 )
             )
             status = "CONVERGED" if l1_distance < tolerance else "continuing"
@@ -309,7 +310,7 @@ def run_srds_diffusion(
 
     l1_distance = np.average(
         np.abs(
-            np.array(gt_images, dtype=np.float32) - np.array(images, dtype=np.float32)
+            np.array(gt_images[0], dtype=np.float32) - np.array(images[0], dtype=np.float32)
         )
     )
     print(
