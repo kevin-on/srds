@@ -174,6 +174,7 @@ def run_srds_diffusion(
     trajectory_errors = []
     prev_iter_images: Image.Image = None
 
+    # Main part
     for srds_iter in tqdm(
         range(coarse_num_inference_steps), desc="SRDS Iterations"
     ):  # line 6 of Algorithm 1
