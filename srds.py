@@ -141,29 +141,29 @@ class SRDS:
         #########################################################
 
         # Initialize solution trajectories: each list has (coarse_num_inference_steps + 1) elements
-        prev_final_solutions: List[torch.Tensor] = [
+        prev_fine_prediction: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
-        ]
-        prev_fine_solutions: List[torch.Tensor] = [
+        ]  # F_n(U_{k-1}^{n-1})
+        prev_coarse_prediction: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
-        ]
-        prev_coarse_solutions: List[torch.Tensor] = [
+        ]  # G_n(U_{k-1}^{n-1})
+        prev_corrected_solution: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
-        ]
-        cur_final_solutions: List[torch.Tensor] = [
+        ]  # U_k^n
+        cur_fine_prediction: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
-        ]
-        cur_fine_solutions: List[torch.Tensor] = [
+        ]  # F_n(U_k^{n-1})
+        cur_coarse_prediction: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
-        ]
-        cur_coarse_solutions: List[torch.Tensor] = [
+        ]  # G_n(U_k^{n-1})
+        cur_corrected_solution: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
-        ]
+        ]  # U_{k+1}^n
 
         # Initialize previous solutions
         for i in range(1, coarse_num_inference_steps + 1):  # line 2 of Algorithm 1
-            prev_final_solutions[i] = diffusion_step(  # line 3 of Algorithm 1
-                prev_final_solutions[i - 1],
+            prev_coarse_prediction[i] = diffusion_step(  # line 3 of Algorithm 1
+                prev_coarse_prediction[i - 1],
                 coarse_timesteps[i - 1],
                 prompt_embeds,
                 pipe_coarse.unet,
@@ -172,7 +172,8 @@ class SRDS:
                 do_classifier_free_guidance,
             )
 
-        prev_coarse_solutions = [x.clone() for x in prev_final_solutions]
+        # line 4 of Algorithm 1
+        prev_corrected_solution = [x.clone() for x in prev_coarse_prediction]
 
         self._sanity_check_initialization(
             pipe_coarse,
@@ -180,23 +181,23 @@ class SRDS:
             coarse_num_inference_steps,
             guidance_scale,
             initial_latents,
-            prev_final_solutions[-1],
+            prev_corrected_solution[-1],
             output_dir,
         )
 
         trajectory_errors: List[List[float]] = (
             []
         )  # [iteration][timestep] error matrix for convergence analysis
-        prev_iter_images: Optional[List[Image.Image]] = (
+        prev_images: Optional[List[Image.Image]] = (
             None  # Previous final image for L1 convergence check
         )
         for srds_iter in tqdm(
             range(coarse_num_inference_steps), desc="SRDS Iterations"
         ):  # line 6 of Algorithm 1
 
-            # cur_fine_solutions starts from prev_final_solutions
+            # cur_fine_prediction starts from prev_corrected_solution
             for i in range(1, coarse_num_inference_steps + 1):
-                cur_fine_solutions[i] = prev_final_solutions[i - 1].clone()
+                cur_fine_prediction[i] = prev_corrected_solution[i - 1].clone()
 
             tqdm.write(
                 f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
@@ -206,8 +207,8 @@ class SRDS:
                 timestep_end = (
                     coarse_timesteps[i] if i < coarse_num_inference_steps else -1
                 )
-                cur_fine_solutions[i] = diffusion_step(
-                    latents=cur_fine_solutions[i],
+                cur_fine_prediction[i] = diffusion_step(
+                    latents=cur_fine_prediction[i],
                     timestep=timestep_start,
                     timestep_end=timestep_end,
                     prompt_embeds=prompt_embeds,
@@ -221,8 +222,8 @@ class SRDS:
                 f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing coarse sweep"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
-                cur_coarse_solutions[i] = diffusion_step(  # line 10 of Algorithm 1
-                    cur_final_solutions[i - 1],
+                cur_coarse_prediction[i] = diffusion_step(  # line 10 of Algorithm 1
+                    cur_corrected_solution[i - 1],
                     coarse_timesteps[i - 1],
                     prompt_embeds,
                     pipe_coarse.unet,
@@ -230,27 +231,27 @@ class SRDS:
                     guidance_scale,
                     do_classifier_free_guidance,
                 )
-                cur_final_solutions[i] = cur_fine_solutions[i] + (
-                    cur_coarse_solutions[i] - prev_coarse_solutions[i]
+                cur_corrected_solution[i] = cur_fine_prediction[i] + (
+                    cur_coarse_prediction[i] - prev_coarse_prediction[i]
                 )  # line 11 of Algorithm 1
 
-            diff_in_cur_iter = []
+            timestep_errors = []
             for i in range(1, coarse_num_inference_steps + 1):
-                diff_in_cur_iter.append(
-                    torch.norm(cur_final_solutions[i] - gt_trajectory[i]).item()
+                timestep_errors.append(
+                    torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
                 )
-            trajectory_errors.append(diff_in_cur_iter)
+            trajectory_errors.append(timestep_errors)
 
             # Save final images of every iteration
-            images = decode_latents_to_pil(cur_final_solutions[-1], pipe_coarse)
+            images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
             save_images_as_grid(images, f"{output_dir}/srds_iteration_{srds_iter}.png")
 
             # Check convergence (line 13-14 of Algorithm 1)
-            if prev_iter_images is not None:
+            if prev_images is not None:
 
                 l1_distance = np.average(
                     np.abs(
-                        np.array(prev_iter_images, dtype=np.float32)
+                        np.array(prev_images, dtype=np.float32)
                         - np.array(images, dtype=np.float32)
                     )
                 )
@@ -263,13 +264,13 @@ class SRDS:
                     break
 
             # Update previous solutions (line 12 of Algorithm 1)
-            prev_coarse_solutions[:] = cur_coarse_solutions
-            prev_fine_solutions[:] = cur_fine_solutions
-            prev_final_solutions[:] = cur_final_solutions
-            prev_iter_images = images
+            prev_coarse_prediction[:] = cur_coarse_prediction
+            prev_fine_prediction[:] = cur_fine_prediction
+            prev_corrected_solution[:] = cur_corrected_solution
+            prev_images = images
 
         # Save outputs and analyze results
-        images = decode_latents_to_pil(cur_final_solutions[-1], pipe_coarse)
+        images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
         gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
