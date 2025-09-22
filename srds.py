@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 import torch
 from diffusers import DDIMScheduler, StableDiffusionPipeline
-from einops import rearrange
 from PIL import Image
 from tqdm import tqdm
 
@@ -35,7 +34,7 @@ class SRDS:
         # Initialize the pipeline (will be loaded when needed)
         self.pipe = None
 
-    def _load_pipeline(self):
+    def _load_pipeline(self) -> None:
         """Load the pipeline if not already loaded"""
         if self.pipe is None:
             self.pipe = StableDiffusionPipeline.from_pretrained(
@@ -56,7 +55,7 @@ class SRDS:
         width: int = 512,
         generator: Optional[torch.Generator] = None,
         output_dir: str = "output",
-    ):
+    ) -> List[Image.Image]:
         # Load pipeline if needed
         self._load_pipeline()
 
@@ -135,23 +134,37 @@ class SRDS:
             pipe_coarse.unet,
             guidance_scale,
             do_classifier_free_guidance,
-            prompts,
         )
 
-        # Run SRDS diffusion
-        prev_latents = torch.cat(
-            [initial_latents] * coarse_num_inference_steps, dim=0
-        )  # prev_{i} in Algorithm 1
-        cur_latents = prev_latents.clone()  # cur_{i} in Algorithm 1
+        #########################################################
+        # SRDS diffusion
+        #########################################################
 
-        # Initialize previous latents
-        for i in range(coarse_num_inference_steps):  # line 2 of Algorithm 1
-            current_slice = slice(i * len(prompts), (i + 1) * len(prompts))
-            prev_slice = slice((i - 1) * len(prompts), i * len(prompts))
+        # Initialize solution trajectories: each list has (coarse_num_inference_steps + 1) elements
+        prev_final_solutions: List[torch.Tensor] = [
+            initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
+        ]
+        prev_fine_solutions: List[torch.Tensor] = [
+            initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
+        ]
+        prev_coarse_solutions: List[torch.Tensor] = [
+            initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
+        ]
+        cur_final_solutions: List[torch.Tensor] = [
+            initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
+        ]
+        cur_fine_solutions: List[torch.Tensor] = [
+            initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
+        ]
+        cur_coarse_solutions: List[torch.Tensor] = [
+            initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
+        ]
 
-            prev_latents[current_slice] = diffusion_step(  # line 3 of Algorithm 1
-                (prev_latents[prev_slice] if i > 0 else initial_latents),
-                coarse_timesteps[i],
+        # Initialize previous solutions
+        for i in range(1, coarse_num_inference_steps + 1):  # line 2 of Algorithm 1
+            prev_final_solutions[i] = diffusion_step(  # line 3 of Algorithm 1
+                prev_final_solutions[i - 1],
+                coarse_timesteps[i - 1],
                 prompt_embeds,
                 pipe_coarse.unet,
                 scheduler_coarse,
@@ -159,7 +172,7 @@ class SRDS:
                 do_classifier_free_guidance,
             )
 
-        x = prev_latents.clone()  # x_{i} in Algorithm 1, line 4 of Algorithm 1
+        prev_coarse_solutions = [x.clone() for x in prev_final_solutions]
 
         self._sanity_check_initialization(
             pipe_coarse,
@@ -167,35 +180,34 @@ class SRDS:
             coarse_num_inference_steps,
             guidance_scale,
             initial_latents,
-            prev_latents,
+            prev_final_solutions[-1],
             output_dir,
         )
 
-        trajectory_errors = []
-        prev_iter_images: Image.Image = None
-
+        trajectory_errors: List[List[float]] = (
+            []
+        )  # [iteration][timestep] error matrix for convergence analysis
+        prev_iter_images: Optional[List[Image.Image]] = (
+            None  # Previous final image for L1 convergence check
+        )
         for srds_iter in tqdm(
             range(coarse_num_inference_steps), desc="SRDS Iterations"
         ):  # line 6 of Algorithm 1
 
-            y = torch.cat(
-                [initial_latents, x[: -len(prompts)]], dim=0
-            )  # y_{i} in Algorithm 1
+            # cur_fine_solutions starts from prev_final_solutions
+            for i in range(1, coarse_num_inference_steps + 1):
+                cur_fine_solutions[i] = prev_final_solutions[i - 1].clone()
 
-            # Update description for fine steps
             tqdm.write(
                 f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
             )
-            for i in range(coarse_num_inference_steps):  # line 7 of Algorithm 1
-                current_slice = slice(i * len(prompts), (i + 1) * len(prompts))
-                timestep_start = coarse_timesteps[i]
+            for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
+                timestep_start = coarse_timesteps[i - 1]
                 timestep_end = (
-                    coarse_timesteps[i + 1]
-                    if i < coarse_num_inference_steps - 1
-                    else -1
+                    coarse_timesteps[i] if i < coarse_num_inference_steps else -1
                 )
-                y[current_slice] = diffusion_step(
-                    latents=y[current_slice],
+                cur_fine_solutions[i] = diffusion_step(
+                    latents=cur_fine_solutions[i],
                     timestep=timestep_start,
                     timestep_end=timestep_end,
                     prompt_embeds=prompt_embeds,
@@ -205,40 +217,32 @@ class SRDS:
                     do_classifier_free_guidance=do_classifier_free_guidance,
                 )
 
-            # Update description for coarse steps
             tqdm.write(
                 f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing coarse sweep"
             )
-            for i in range(coarse_num_inference_steps):  # line 9 of Algorithm 1
-                current_slice = slice(i * len(prompts), (i + 1) * len(prompts))
-                prev_slice = slice((i - 1) * len(prompts), i * len(prompts))
-
-                cur_latents[current_slice] = diffusion_step(  # line 10 of Algorithm 1
-                    (x[prev_slice] if i > 0 else initial_latents),
-                    coarse_timesteps[i],
+            for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
+                cur_coarse_solutions[i] = diffusion_step(  # line 10 of Algorithm 1
+                    cur_final_solutions[i - 1],
+                    coarse_timesteps[i - 1],
                     prompt_embeds,
                     pipe_coarse.unet,
                     scheduler_coarse,
                     guidance_scale,
                     do_classifier_free_guidance,
                 )
-                x[current_slice] = y[current_slice] + (
-                    cur_latents[current_slice] - prev_latents[current_slice]
+                cur_final_solutions[i] = cur_fine_solutions[i] + (
+                    cur_coarse_solutions[i] - prev_coarse_solutions[i]
                 )  # line 11 of Algorithm 1
-                prev_latents[current_slice] = cur_latents[
-                    current_slice
-                ]  # line 12 of Algorithm 1
 
-            diff_reshaped = rearrange(
-                x - gt_trajectory,
-                "(steps prompts) ... -> steps prompts ...",
-                steps=coarse_num_inference_steps,
-                prompts=len(prompts),
-            )
-            trajectory_errors.append(torch.norm(diff_reshaped.flatten(1), dim=1))
+            diff_in_cur_iter = []
+            for i in range(1, coarse_num_inference_steps + 1):
+                diff_in_cur_iter.append(
+                    torch.norm(cur_final_solutions[i] - gt_trajectory[i]).item()
+                )
+            trajectory_errors.append(diff_in_cur_iter)
 
             # Save final images of every iteration
-            images = decode_latents_to_pil(x[-len(prompts) :], pipe_coarse)
+            images = decode_latents_to_pil(cur_final_solutions[-1], pipe_coarse)
             save_images_as_grid(images, f"{output_dir}/srds_iteration_{srds_iter}.png")
 
             # Check convergence (line 13-14 of Algorithm 1)
@@ -258,11 +262,15 @@ class SRDS:
                 if l1_distance < tolerance:
                     break
 
+            # Update previous solutions (line 12 of Algorithm 1)
+            prev_coarse_solutions[:] = cur_coarse_solutions
+            prev_fine_solutions[:] = cur_fine_solutions
+            prev_final_solutions[:] = cur_final_solutions
             prev_iter_images = images
 
         # Save outputs and analyze results
-        images = decode_latents_to_pil(x[-len(prompts) :], pipe_coarse)
-        gt_images = decode_latents_to_pil(gt_trajectory[-len(prompts) :], pipe_coarse)
+        images = decode_latents_to_pil(cur_final_solutions[-1], pipe_coarse)
+        gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
             images, gt_images, trajectory_errors, coarse_num_inference_steps, output_dir
@@ -282,23 +290,27 @@ class SRDS:
 
     def _compute_gt_trajectory(
         self,
-        initial_latents,
-        fine_num_inference_steps,
-        coarse_timesteps,
-        scheduler_fine,
-        prompt_embeds,
-        unet,
-        guidance_scale,
-        do_classifier_free_guidance,
-        prompts,
-    ):
-        """Compute ground truth DDIM trajectory"""
-        latents_gt_list = []
+        initial_latents: torch.Tensor,
+        fine_num_inference_steps: int,
+        coarse_timesteps: torch.Tensor,
+        scheduler_fine: DDIMScheduler,
+        prompt_embeds: torch.Tensor,
+        unet: torch.nn.Module,
+        guidance_scale: float,
+        do_classifier_free_guidance: bool,
+    ) -> List[torch.Tensor]:
+        """
+        Compute ground truth DDIM trajectory using fine scheduler.
+
+        Returns:
+            List[torch.Tensor]: Ground truth latents at each coarse timestep, with length = coarse_num_inference_steps + 1.
+        """
+        gt_trajectory = []
         latents_gt = initial_latents.clone()
         for i in range(fine_num_inference_steps):
             t = scheduler_fine.timesteps[i]
             if t in coarse_timesteps:
-                latents_gt_list.append(latents_gt.clone())
+                gt_trajectory.append(latents_gt.clone())
             latents_gt = diffusion_step(
                 latents_gt,
                 t,
@@ -308,20 +320,19 @@ class SRDS:
                 guidance_scale,
                 do_classifier_free_guidance,
             )
-        latents_gt_list.append(latents_gt.clone())
-        gt_trajectory = torch.cat(latents_gt_list[1:], dim=0)
+        gt_trajectory.append(latents_gt.clone())
         return gt_trajectory
 
     def _sanity_check_initialization(
         self,
-        pipe_coarse,
-        prompts,
-        coarse_num_inference_steps,
-        guidance_scale,
-        initial_latents,
-        prev_latents,
-        output_dir,
-    ):
+        pipe_coarse: StableDiffusionPipeline,
+        prompts: List[str],
+        coarse_num_inference_steps: int,
+        guidance_scale: float,
+        initial_latents: torch.Tensor,
+        final_latents: torch.Tensor,
+        output_dir: str,
+    ) -> None:
         """
         Sanity check initialized latents
         Initialized latents at t = 0 should be the same as the that of the DDIM coarse output
@@ -335,9 +346,7 @@ class SRDS:
 
         save_images_as_grid(coarse_output.images, f"{output_dir}/srds_ddim_coarse.png")
 
-        initialized_images = decode_latents_to_pil(
-            prev_latents[-len(prompts) :], pipe_coarse
-        )
+        initialized_images = decode_latents_to_pil(final_latents, pipe_coarse)
         save_images_as_grid(initialized_images, f"{output_dir}/srds_initialized.png")
 
         if len(coarse_output.images) == len(initialized_images) and all(
@@ -354,12 +363,12 @@ class SRDS:
 
     def _save_outputs(
         self,
-        images,
-        gt_images,
-        trajectory_errors,
-        coarse_num_inference_steps,
-        output_dir,
-    ):
+        images: List[Image.Image],
+        gt_images: List[Image.Image],
+        trajectory_errors: List[List[float]],
+        coarse_num_inference_steps: int,
+        output_dir: str,
+    ) -> None:
         """Save final outputs and analysis"""
         # Save the final image
         save_images_as_grid(images, f"{output_dir}/srds_final.png")
@@ -369,9 +378,8 @@ class SRDS:
 
         # Save trajectory errors to CSV
         if trajectory_errors:
-            diff_tensor = torch.stack(trajectory_errors)
             df = pd.DataFrame(
-                diff_tensor.cpu().numpy(),
+                np.array(trajectory_errors),
                 index=[f"Iteration_{i}" for i in range(len(trajectory_errors))],
                 columns=[f"Timestep_{i}" for i in range(coarse_num_inference_steps)],
             )
