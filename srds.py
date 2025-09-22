@@ -9,13 +9,14 @@ from einops import rearrange
 from PIL import Image
 from tqdm import tqdm
 
-from diffusion import (diffusion_step, diffusion_step_batched,
-                       diffusion_step_sequential)
+from diffusion import diffusion_step
 from utils import decode_latents_to_pil, save_images_as_grid
 
 """
-TODO list:
-- Fix diffusion_step_batched bug (currently produces different results than sequential)
+Implementation of Self-Refining Diffusion Samplers (SRDS) algorithm.
+
+Future Enhancements:
+- Implement parallel processing for fine-solver
 - Implement pipelining
 """
 
@@ -186,22 +187,21 @@ def run_srds_diffusion(
         tqdm.write(
             f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
         )
-        for i in range(
-            fine_num_inference_steps // coarse_num_inference_steps
-        ):  # line 7 of Algorithm 1
-            # FIXME: Use batched version once bug is fixed
-            # y = diffusion_step_batched(  # line 8 of Algorithm 1
-            y = diffusion_step_sequential(
-                y,
-                fine_timesteps[coarse_indices_tensor + i].repeat_interleave(
-                    len(prompts)
-                ),
-                prompt_embeds,
-                len(prompts),
-                pipe_coarse.unet,
-                scheduler_fine,
-                guidance_scale,
-                do_classifier_free_guidance,
+        for i in range(coarse_num_inference_steps):  # line 7 of Algorithm 1
+            current_slice = slice(i * len(prompts), (i + 1) * len(prompts))
+            timestep_start = coarse_timesteps[i]
+            timestep_end = (
+                coarse_timesteps[i + 1] if i < coarse_num_inference_steps - 1 else -1
+            )
+            y[current_slice] = diffusion_step(
+                latents=y[current_slice],
+                timestep=timestep_start,
+                timestep_end=timestep_end,
+                prompt_embeds=prompt_embeds,
+                unet=pipe_coarse.unet,
+                scheduler=scheduler_fine,
+                guidance_scale=guidance_scale,
+                do_classifier_free_guidance=do_classifier_free_guidance,
             )
 
         # Update description for coarse steps
@@ -242,7 +242,7 @@ def run_srds_diffusion(
 
         # Check convergence (line 13-14 of Algorithm 1)
         if prev_iter_images is not None:
-            
+
             l1_distance = np.average(
                 np.abs(
                     np.array(prev_iter_images[0], dtype=np.float32)
@@ -310,7 +310,8 @@ def run_srds_diffusion(
 
     l1_distance = np.average(
         np.abs(
-            np.array(gt_images[0], dtype=np.float32) - np.array(images[0], dtype=np.float32)
+            np.array(gt_images[0], dtype=np.float32)
+            - np.array(images[0], dtype=np.float32)
         )
     )
     print(
