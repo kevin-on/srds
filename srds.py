@@ -245,8 +245,8 @@ def run_srds_diffusion(
 
             l1_distance = np.average(
                 np.abs(
-                    np.array(prev_iter_images[0], dtype=np.float32)
-                    - np.array(images[0], dtype=np.float32)
+                    np.array(prev_iter_images, dtype=np.float32)
+                    - np.array(images, dtype=np.float32)
                 )
             )
             status = "CONVERGED" if l1_distance < tolerance else "continuing"
@@ -310,8 +310,7 @@ def run_srds_diffusion(
 
     l1_distance = np.average(
         np.abs(
-            np.array(gt_images[0], dtype=np.float32)
-            - np.array(images[0], dtype=np.float32)
+            np.array(gt_images, dtype=np.float32) - np.array(images, dtype=np.float32)
         )
     )
     print(
