@@ -1,10 +1,7 @@
-import os
-from typing import List, Optional, Union
+from typing import Optional, Union
 
 import torch
 from diffusers import SchedulerMixin, UNet2DConditionModel
-
-from utils import decode_latents_to_pil
 
 
 @torch.no_grad()
@@ -16,20 +13,105 @@ def diffusion_step(
     scheduler: SchedulerMixin,
     guidance_scale: float = 7.5,
     do_classifier_free_guidance: bool = True,
+    timestep_end: Optional[Union[torch.Tensor, float, int]] = None,
 ):
     """
-    Single diffusion step for denoising.
+    Single or multiple diffusion steps for denoising.
 
     This function is extracted from the StableDiffusionPipeline's denoising loop
     to allow for custom diffusion sampling algorithms like SRDS.
+
+    Args:
+        timestep_end: Optional end timestep. When provided, multiple diffusion steps
+                     will be executed from timestep up to but not including timestep_end (exclusive).
+                     Use timestep_end=-1 to process until the very last timestep.
+    """
+    # Convert timesteps to int for easier comparison
+    timestep_val = timestep.item() if isinstance(timestep, torch.Tensor) else timestep
+
+    if timestep_end is not None:
+        # Find the range of timesteps to process
+        scheduler_timesteps = scheduler.timesteps.tolist()
+
+        # Get start index
+        try:
+            start_idx = scheduler_timesteps.index(timestep_val)
+        except ValueError:
+            raise ValueError(
+                f"Start timestep {timestep_val} not found in scheduler timesteps"
+            )
+
+        # Handle different timestep_end cases
+        if timestep_end == -1:
+            # Special case: process until the very end (last timestep in scheduler)
+            end_idx = len(scheduler_timesteps)
+        else:
+            timestep_end_val = (
+                timestep_end.item()
+                if isinstance(timestep_end, torch.Tensor)
+                else timestep_end
+            )
+            try:
+                end_idx = scheduler_timesteps.index(timestep_end_val)
+            except ValueError:
+                raise ValueError(
+                    f"End timestep {timestep_end_val} not found in scheduler timesteps"
+                )
+
+        # Ensure we're going in the right direction (start_idx < end_idx for denoising)
+        if start_idx >= end_idx:
+            raise ValueError(
+                f"Invalid timestep range: start index {start_idx} must be less than end index {end_idx}"
+            )
+
+        # Run multiple diffusion steps (exclusive of end_idx)
+        current_latents = latents
+        for i in range(start_idx, end_idx):
+            current_timestep = scheduler_timesteps[i]
+            current_latents = _single_diffusion_step(
+                current_latents,
+                current_timestep,
+                prompt_embeds,
+                unet,
+                scheduler,
+                guidance_scale,
+                do_classifier_free_guidance,
+            )
+
+        return current_latents
+    else:
+        # Single timestep processing (original behavior)
+        return _single_diffusion_step(
+            latents,
+            timestep,
+            prompt_embeds,
+            unet,
+            scheduler,
+            guidance_scale,
+            do_classifier_free_guidance,
+        )
+
+
+def _single_diffusion_step(
+    latents: torch.Tensor,
+    timestep: Union[torch.Tensor, float, int],
+    prompt_embeds: torch.Tensor,
+    unet: UNet2DConditionModel,
+    scheduler: SchedulerMixin,
+    guidance_scale: float = 7.5,
+    do_classifier_free_guidance: bool = True,
+):
+    """
+    Internal function for a single diffusion step.
     """
     # Only single timestep is supported for this function
     if isinstance(timestep, torch.Tensor) and timestep.numel() > 1:
         raise ValueError("Only single timestep is supported")
 
     # Validate timestep is in scheduler's timestep list
-    if timestep.item() not in scheduler.timesteps:
-        raise ValueError(f"Invalid timestep {timestep} not in scheduler timesteps")
+    timestep_val = timestep.item() if isinstance(timestep, torch.Tensor) else timestep
+    if timestep_val not in scheduler.timesteps:
+        raise ValueError(f"Invalid timestep {timestep_val} not in scheduler timesteps")
 
     # move the timestep to the same device as the latents
     if isinstance(timestep, torch.Tensor):
@@ -73,6 +155,8 @@ def diffusion_step_batched(
     do_classifier_free_guidance: bool = True,
 ):
     """
+    DEPRECATED: Use diffusion_step with timestep_end parameter instead.
+
     Parallel diffusion step for processing multiple timesteps simultaneously.
 
     Note: There may be slight numerical differences compared to sequential processing
@@ -155,6 +239,8 @@ def diffusion_step_sequential(
     do_classifier_free_guidance: bool = True,
 ):
     """
+    DEPRECATED: Use diffusion_step with timestep_end parameter instead.
+
     Sequential diffusion step for processing multiple timesteps sequentially.
     This implementation works correctly and produces expected results.
     """
@@ -176,107 +262,3 @@ def diffusion_step_sequential(
         )
 
     return latents
-
-
-@torch.no_grad()
-def sanity_check_diffusion_step(
-    prompts: List[str],
-    num_inference_steps: int = 10,
-    guidance_scale: float = 7.5,
-    height: int = 512,
-    width: int = 512,
-    seed: int = 42,
-    model_id: str = "stabilityai/stable-diffusion-2",
-    output_dir: Optional[str] = None,
-):
-    from diffusers import DDIMScheduler, StableDiffusionPipeline
-
-    generator = torch.Generator("cuda").manual_seed(seed)
-
-    scheduler = DDIMScheduler.from_pretrained(
-        model_id, subfolder="scheduler", timestep_spacing="trailing"
-    )
-    scheduler.set_timesteps(num_inference_steps)
-
-    pipe = StableDiffusionPipeline.from_pretrained(
-        model_id,
-        scheduler=scheduler,
-    )
-    pipe = pipe.to("cuda")
-
-    # Encode prompt
-    do_classifier_free_guidance = guidance_scale > 1.0
-    prompt_embeds, negative_prompt_embeds = pipe.encode_prompt(
-        prompt=prompts,
-        device=pipe.device,
-        num_images_per_prompt=1,
-        do_classifier_free_guidance=do_classifier_free_guidance,
-    )
-
-    # For classifier free guidance, concatenate the unconditional and text embeddings
-    if do_classifier_free_guidance:
-        prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
-
-    # Prepare latent variables
-    num_channels_latents = pipe.unet.config.in_channels
-    initial_latents = pipe.prepare_latents(  # line 1 of Algorithm 1
-        len(prompts),
-        num_channels_latents,
-        height,
-        width,
-        prompt_embeds.dtype,
-        pipe.device,
-        generator,
-    )
-
-    # Run stable diffusion pipeline to get ground truth
-    output_gt = pipe(
-        prompts,
-        num_inference_steps=num_inference_steps,
-        guidance_scale=guidance_scale,
-        latents=initial_latents,
-        generator=generator,
-    )
-
-    # Run diffusion pipeline with diffusion_step function
-    latents = initial_latents.clone()
-    for i in range(num_inference_steps):
-        t = scheduler.timesteps[i]
-        latents = diffusion_step(
-            latents,
-            t,
-            prompt_embeds,
-            pipe.unet,
-            scheduler,
-            guidance_scale,
-            do_classifier_free_guidance,
-        )
-
-    images = decode_latents_to_pil(latents, pipe)
-
-    # Check if the two images are the same
-    if images[0].tobytes() == output_gt.images[0].tobytes():
-        print(
-            "✓ PASS: Custom diffusion step produces identical output to standard pipeline"
-        )
-    else:
-        print(
-            "✗ FAIL: Custom diffusion step output differs from standard pipeline - implementation may have bugs"
-        )
-
-    if output_dir is not None:
-        os.makedirs(output_dir, exist_ok=True)
-        images[0].save(f"{output_dir}/sanity_check_result.png")
-        output_gt.images[0].save(f"{output_dir}/sanity_check_gt.png")
-
-
-if __name__ == "__main__":
-    sanity_check_diffusion_step(
-        prompts=["a beautiful painting of a cat"],
-        num_inference_steps=10,
-        guidance_scale=7.5,
-        height=512,
-        width=512,
-        seed=42,
-        output_dir="output/sanity_check",
-    )

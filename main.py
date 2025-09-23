@@ -3,7 +3,7 @@ import os
 
 import torch
 
-from srds import run_srds_diffusion
+from srds import SRDS
 
 
 def set_seed(seed: int):
@@ -90,7 +90,11 @@ if __name__ == "__main__":
     set_seed(args.seed)
     generator = torch.Generator("cuda").manual_seed(args.seed)
 
-    run_srds_diffusion(
+    # Initialize SRDS with model configuration
+    srds = SRDS(model_id=args.model)
+
+    # Run the algorithm
+    srds(
         prompts=prompts,
         coarse_num_inference_steps=args.coarse_steps,
         fine_num_inference_steps=args.fine_steps,
@@ -99,6 +103,5 @@ if __name__ == "__main__":
         height=args.height,
         width=args.width,
         generator=generator,
-        model_id=args.model,
         output_dir=args.output_dir,
     )
