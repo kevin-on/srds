@@ -3,6 +3,7 @@ import os
 
 import torch
 
+from sparareal import StochasticParareal
 from srds import SRDS
 
 
@@ -60,6 +61,23 @@ def parse_args():
         "--tolerance", "-tol", type=float, default=0.1, help="Convergence tolerance"
     )
 
+    # Algorithm selection
+    parser.add_argument(
+        "--algorithm",
+        "-a",
+        type=str,
+        choices=["srds", "sparareal"],
+        default="srds",
+        help="Algorithm to use: srds or sparareal",
+    )
+    parser.add_argument(
+        "--num-samples",
+        "-ns",
+        type=int,
+        default=1,
+        help="Number of samples for sparareal algorithm (ignored for srds)",
+    )
+
     # Optional arguments
     parser.add_argument(
         "--guidance-scale",
@@ -90,18 +108,31 @@ if __name__ == "__main__":
     set_seed(args.seed)
     generator = torch.Generator("cuda").manual_seed(args.seed)
 
-    # Initialize SRDS with model configuration
-    srds = SRDS(model_id=args.model)
-
-    # Run the algorithm
-    srds(
-        prompts=prompts,
-        coarse_num_inference_steps=args.coarse_steps,
-        fine_num_inference_steps=args.fine_steps,
-        tolerance=args.tolerance,
-        guidance_scale=args.guidance_scale,
-        height=args.height,
-        width=args.width,
-        generator=generator,
-        output_dir=args.output_dir,
-    )
+    # Run selected algorithm
+    if args.algorithm == "srds":
+        algorithm = SRDS(model_id=args.model)
+        algorithm(
+            prompts=prompts,
+            coarse_num_inference_steps=args.coarse_steps,
+            fine_num_inference_steps=args.fine_steps,
+            tolerance=args.tolerance,
+            guidance_scale=args.guidance_scale,
+            height=args.height,
+            width=args.width,
+            generator=generator,
+            output_dir=args.output_dir,
+        )
+    elif args.algorithm == "sparareal":
+        algorithm = StochasticParareal(model_id=args.model)
+        algorithm(
+            prompts=prompts,
+            coarse_num_inference_steps=args.coarse_steps,
+            fine_num_inference_steps=args.fine_steps,
+            num_samples=args.num_samples,
+            tolerance=args.tolerance,
+            guidance_scale=args.guidance_scale,
+            height=args.height,
+            width=args.width,
+            generator=generator,
+            output_dir=args.output_dir,
+        )
