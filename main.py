@@ -77,6 +77,12 @@ def parse_args():
         default=1,
         help="Number of samples for sparareal algorithm (ignored for srds)",
     )
+    parser.add_argument(
+        "--eta",
+        type=float,
+        default=1.0,
+        help="Stochasticity",
+    )
 
     # Optional arguments
     parser.add_argument(
@@ -131,6 +137,7 @@ if __name__ == "__main__":
             num_samples=args.num_samples,
             tolerance=args.tolerance,
             guidance_scale=args.guidance_scale,
+            eta=args.eta,
             height=args.height,
             width=args.width,
             generator=generator,

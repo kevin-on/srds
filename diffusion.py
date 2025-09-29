@@ -3,6 +3,109 @@ from typing import Optional, Union
 import torch
 from diffusers import SchedulerMixin, UNet2DConditionModel
 
+@torch.no_grad()
+def ddim_step_with_eta(
+    x_t: torch.Tensor,
+    x_t_minus_1: torch.Tensor,
+    timestep: Union[torch.Tensor, float, int],
+    scheduler: SchedulerMixin,
+    eta: float = 0.0,
+    generator: Optional[torch.Generator] = None,
+):
+    """
+    Compute DDIM step with eta > 0 given x_t and x_{t-1} (from eta=0 DDIM).
+
+    This function mimics the official DDIMScheduler.step() with eta parameter.
+    For eta=0: deterministic DDIM (x_{t-1} is given)
+    For eta>0: stochastic interpolation between DDIM and DDPM
+
+    Args:
+        x_t: Current latent at timestep t
+        x_t_minus_1: Target latent at timestep t-1 (from eta=0 DDIM)
+        timestep: Current timestep t
+        scheduler: DDIM scheduler
+        eta: DDIM eta parameter (0=deterministic, 1=full stochastic)
+        generator: Random generator for reproducible sampling
+
+    Returns:
+        New x_{t-1} sample with stochasticity controlled by eta
+    """
+    if eta < 0 or eta > 1:
+        raise ValueError(f"eta must be between 0 and 1, got {eta}")
+
+    if eta == 0.0:
+        # Pure deterministic case - return the given x_{t-1}
+        return x_t_minus_1
+
+    # Get scheduler parameters
+    timestep_val = timestep.item() if isinstance(timestep, torch.Tensor) else timestep
+    if timestep_val not in scheduler.timesteps:
+        raise ValueError(f"Invalid timestep {timestep_val} not in scheduler timesteps")
+
+    # Get step index and alpha values from scheduler
+    step_index = (scheduler.timesteps == timestep_val).nonzero().item()
+    
+    # Get alpha values at current and previous timesteps
+    alpha_prod_t = scheduler.alphas_cumprod[timestep_val]
+    
+    if step_index == len(scheduler.timesteps) - 1:
+        alpha_prod_t_prev = torch.tensor(1.0, device=x_t.device, dtype=x_t.dtype)
+    else:
+        prev_timestep = scheduler.timesteps[step_index + 1]
+        alpha_prod_t_prev = scheduler.alphas_cumprod[prev_timestep]
+
+    # Extract noise prediction from the deterministic DDIM result
+    # From DDIM equations:
+    # x_t = sqrt(α_t) * x_0 + sqrt(1-α_t) * ε
+    # x_{t-1} = sqrt(α_{t-1}) * x_0 + sqrt(1-α_{t-1}) * ε (for eta=0)
+    
+    sqrt_alpha_prod_t = alpha_prod_t ** 0.5
+    sqrt_one_minus_alpha_prod_t = (1 - alpha_prod_t) ** 0.5
+    sqrt_alpha_prod_t_prev = alpha_prod_t_prev ** 0.5
+    sqrt_one_minus_alpha_prod_t_prev = (1 - alpha_prod_t_prev) ** 0.5
+    
+    denominator = sqrt_alpha_prod_t_prev * sqrt_one_minus_alpha_prod_t - sqrt_alpha_prod_t * sqrt_one_minus_alpha_prod_t_prev
+    
+    if abs(denominator) < 1e-8:
+        # Fallback for numerical stability
+        pred_x0 = (x_t_minus_1 - sqrt_one_minus_alpha_prod_t_prev * 
+                  (x_t - sqrt_alpha_prod_t * x_t_minus_1 / sqrt_alpha_prod_t_prev) / sqrt_one_minus_alpha_prod_t) / sqrt_alpha_prod_t_prev
+    else:
+        # More stable solution
+        pred_x0 = (x_t_minus_1 * sqrt_one_minus_alpha_prod_t - x_t * sqrt_one_minus_alpha_prod_t_prev) / denominator
+    
+    # Extract noise prediction
+    noise_pred = (x_t - sqrt_alpha_prod_t * pred_x0) / sqrt_one_minus_alpha_prod_t
+
+    # Compute variance following the DDIM paper
+    # variance = σ_t^2 = η^2 * β_{t-1} * (1 - α_t / α_{t-1}) / (1 - α_t)
+    beta_prod_t = 1 - alpha_prod_t
+    beta_prod_t_prev = 1 - alpha_prod_t_prev
+    
+    # Standard DDIM variance calculation
+    variance = (beta_prod_t_prev / beta_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
+    std_dev_t = eta * (variance ** 0.5)
+
+    # Generate random noise
+    if generator is not None:
+        noise = torch.randn(x_t.shape, generator=generator, device=x_t.device, dtype=x_t.dtype)
+    else:
+        noise = torch.randn_like(x_t)
+
+    # Compute the new sample with stochasticity
+    # Following DDIM paper: x_{t-1} = sqrt(α_{t-1}) * x_0 + sqrt(1-α_{t-1}-σ_t^2) * ε + σ_t * z
+    # where z is random noise
+    
+    # Direction pointing to x_t (for DDIM deterministic part)
+    pred_sample_direction = (1 - alpha_prod_t_prev - std_dev_t ** 2) ** 0.5 * noise_pred
+    
+    # Combine deterministic and stochastic parts
+    prev_sample = sqrt_alpha_prod_t_prev * pred_x0 + pred_sample_direction + std_dev_t * noise
+    
+    return prev_sample
+
+
+
 
 @torch.no_grad()
 def diffusion_step(

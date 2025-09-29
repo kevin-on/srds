@@ -2,37 +2,63 @@ from typing import List, Optional, Union
 
 import numpy as np
 import torch
-from diffusers import DDIMScheduler, StableDiffusionPipeline
+from diffusers import DDIMScheduler, StableDiffusionPipeline, SchedulerMixin
 from PIL import Image
 from tqdm import tqdm
 
-from diffusion import diffusion_step
+from diffusion import diffusion_step, ddim_step_with_eta
 from srds import SRDS
 from utils import decode_latents_to_pil, save_images_as_grid
 
 
 class StochasticParareal(SRDS):
+    
+
+    @torch.no_grad()
     def _sample_latents(
         self,
-        latents: torch.Tensor,
         num_samples: int,
-        std: Union[float, torch.Tensor] = 1.0,
+        x_t: torch.Tensor, 
+        x_t_minus_1: torch.Tensor,
+        timestep: Union[torch.Tensor, float, int],
+        scheduler: SchedulerMixin,
+        eta: float = 0.0,
+        generator: Optional[torch.Generator] = None,
+    
     ) -> List[torch.Tensor]:
+        
         if num_samples < 1:
             raise ValueError("num_samples must be at least 1")
-        if isinstance(std, torch.Tensor):
-            if std.shape != latents.shape:
-                raise ValueError("std must be the same shape as latents")
-            latent_std = std
-        else:
-            latent_std = latents.std() * std
+
         return [
-            latents,
+            x_t_minus_1,
             *[
-                torch.randn_like(latents) * latent_std + latents
-                for _ in range(num_samples - 1)
-            ],
+                ddim_step_with_eta(
+                    x_t,
+                    x_t_minus_1,
+                    timestep,
+                    scheduler,
+                    eta,
+                    generator,
+                ) for _ in range(num_samples - 1)
+            ]
+
         ]
+        # if isinstance(std, torch.Tensor):
+        #     if std.shape != latents.shape:
+        #         raise ValueError("std must be the same shape as latents")
+        #     latent_std = std
+        # else:
+        #     latent_std = latents.std() * std
+        
+        # latent_std = 0.001
+        # return [
+        #     latents,
+        #     *[
+        #         torch.randn_like(latents) * latent_std + latents
+        #         for _ in range(num_samples - 1)
+        #     ],
+        # ]
 
     @torch.no_grad()
     def __call__(
@@ -43,6 +69,7 @@ class StochasticParareal(SRDS):
         num_samples: int,
         tolerance: float,
         guidance_scale: float = 7.5,
+        eta: float = 1.0, 
         height: int = 512,
         width: int = 512,
         generator: Optional[torch.Generator] = None,
@@ -204,16 +231,21 @@ class StochasticParareal(SRDS):
         )
         for srds_iter in tqdm(
             range(coarse_num_inference_steps), desc="SRDS Iterations"
-        ):  # line 6 of Algorithm 1
+        ):  
 
+            # line 6 of Algorithm 1
             # cur_fine_prediction starts from prev_corrected_solution
             for i in range(1, coarse_num_inference_steps + 1):
                 fine_trajectory_samples[i] = [
                     TrajectorySegment(x, x)
                     for x in self._sample_latents(
-                        prev_corrected_solution[i - 1].clone(),
-                        num_samples,
-                        std=prev_abs_delta_coarse_prediction[i],
+                        num_samples=num_samples,
+                        x_t=prev_corrected_solution[i-1].clone(),
+                        x_t_minus_1=prev_corrected_solution[i].clone(),
+                        timestep=coarse_timesteps[i-1],
+                        scheduler=scheduler_coarse,
+                        eta=eta,
+                        generator = None,
                     )
                 ]
 
@@ -308,6 +340,7 @@ class StochasticParareal(SRDS):
                 if l1_distance < tolerance:
                     break
 
+            #FIXME
             # Update prev_abs_delta_coarse_prediction (element-wise absolute difference)
             prev_abs_delta_coarse_prediction = [
                 torch.abs(cur_coarse_prediction[i] - prev_coarse_prediction[i])
