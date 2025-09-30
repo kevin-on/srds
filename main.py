@@ -1,10 +1,12 @@
 import argparse
 import os
+from datetime import datetime
 
 import torch
 
 from sparareal import StochasticParareal
 from srds import SRDS
+from logger import setup_logging, log_info
 
 
 def set_seed(seed: int):
@@ -101,22 +103,64 @@ def parse_args():
         default="stabilityai/stable-diffusion-2",
         help="Hugging Face model ID",
     )
+    parser.add_argument(
+        "--log-file",
+        type=str,
+        default="log.txt",
+        help="Log file path (default: log.txt)",
+    )
 
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    prompts = parse_prompts(args.prompts)
-
+    
+    # Setup basic output directory
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    prompts = parse_prompts(args.prompts)
 
     set_seed(args.seed)
     generator = torch.Generator("cuda").manual_seed(args.seed)
 
+    # Create timestamped subdirectory with parameters
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.algorithm == "sparareal":
+        subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}_ns{args.num_samples}_eta{args.eta}"
+    else:
+        subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}"
+    
+    timestamped_output_dir = os.path.join(args.output_dir, subdir_name)
+    os.makedirs(timestamped_output_dir, exist_ok=True)
+    
+    # Update log file path to use timestamped directory
+    log_file_path = os.path.join(timestamped_output_dir, args.log_file)
+    logger = setup_logging(log_file_path)
+    
+    # Log execution parameters
+    log_info("SRDS/SParareal Execution Started")
+    log_info(f"Algorithm: {args.algorithm}")
+    log_info(f"Output directory: {args.output_dir}")
+    log_info(f"Timestamped output directory: {timestamped_output_dir}")
+    log_info(f"Log file: {log_file_path}")
+    log_info(f"Prompts file: {args.prompts}")
+    log_info(f"Coarse steps: {args.coarse_steps}")
+    log_info(f"Fine steps: {args.fine_steps}")
+    log_info(f"Tolerance: {args.tolerance}")
+    log_info(f"Seed: {args.seed}")
+    log_info(f"Model: {args.model}")
+    if args.algorithm == "sparareal":
+        log_info(f"Num samples: {args.num_samples}")
+        log_info(f"Eta: {args.eta}")
+    
+    log_info(f"Loaded {len(prompts)} prompts")
+
     # Run selected algorithm
     if args.algorithm == "srds":
+        log_info("Initializing SRDS algorithm...")
         algorithm = SRDS(model_id=args.model)
+        log_info("Running SRDS...")
         algorithm(
             prompts=prompts,
             coarse_num_inference_steps=args.coarse_steps,
@@ -126,10 +170,12 @@ if __name__ == "__main__":
             height=args.height,
             width=args.width,
             generator=generator,
-            output_dir=args.output_dir,
+            output_dir=timestamped_output_dir,
         )
     elif args.algorithm == "sparareal":
+        log_info("Initializing SParareal algorithm...")
         algorithm = StochasticParareal(model_id=args.model)
+        log_info("Running SParareal...")
         algorithm(
             prompts=prompts,
             coarse_num_inference_steps=args.coarse_steps,
@@ -141,5 +187,7 @@ if __name__ == "__main__":
             height=args.height,
             width=args.width,
             generator=generator,
-            output_dir=args.output_dir,
+            output_dir=timestamped_output_dir,
         )
+    
+    log_info("Execution completed successfully!")
