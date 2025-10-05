@@ -6,6 +6,24 @@ This repository provides an unofficial implementation of the SRDS algorithm desc
 
 📄 **Paper**: [Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations](https://arxiv.org/abs/2412.08292)
 
+## Project Structure
+
+```
+srds/
+├── src/                    # Core algorithms
+│   ├── srds.py            # SRDS algorithm implementation
+│   ├── sparareal.py       # SParareal algorithm implementation
+│   └── diffusion.py       # Diffusion step functions
+├── scripts/                # Execution scripts
+│   ├── main.py            # Main execution script
+│   ├── sweep.py           # Parameter sweep script
+│   └── run_sweep_example.sh # Sweep example
+├── utils/                  # Utilities
+│   ├── utils.py           # Image processing utilities
+│   └── logger.py          # Logging utilities
+└── output/                # Experiment results
+```
+
 ## Usage
 
 ### Basic Usage
@@ -13,13 +31,35 @@ This repository provides an unofficial implementation of the SRDS algorithm desc
 Run SRDS with a text file containing prompts (one per line):
 
 ```bash
-python main.py --prompts prompts.txt --output-dir output/my_experiment
+python scripts/main.py --prompts example_prompts.txt --output-dir output/my_experiment
+```
+
+Or run with a single direct prompt:
+
+```bash
+python scripts/main.py --prompts "a beautiful landscape with mountains and a lake" --output-dir output/single_test
+```
+
+### Parameter Sweep
+
+Run parameter sweep for a single prompt:
+
+```bash
+python scripts/sweep.py \
+    --prompt "a beautiful landscape with mountains and a lake" \
+    --output-dir "./output/sweeps" \
+    --algorithm sparareal \
+    --coarse-steps 5 10 15 \
+    --fine-steps 50 100 150 \
+    --num-samples 1 5 10 \
+    --eta 0.01 0.1 1.0 \
+    --tolerance 0.01 0.05 0.1
 ```
 
 ### Command Line Arguments
 
 #### Required Arguments
-- `--prompts`, `-p`: Path to text file with prompts (one per line)
+- `--prompts`, `-p`: Path to text file with prompts (one per line) OR direct prompt string
 - `--output-dir`, `-o`: Output directory for generated images and analysis
 
 #### Algorithm Parameters
@@ -53,10 +93,13 @@ output/
 
 ### Core Components
 
-- **`srds.py`**: Main SRDS algorithm implementation
-- **`diffusion.py`**: Low-level diffusion step functions with batched/sequential variants
-- **`utils.py`**: Utility functions for image processing and visualization
-- **`main.py`**: Command-line interface and experiment runner
+- **`src/srds.py`**: Main SRDS algorithm implementation
+- **`src/sparareal.py`**: SParareal algorithm implementation
+- **`src/diffusion.py`**: Low-level diffusion step functions with batched/sequential variants
+- **`utils/utils.py`**: Utility functions for image processing and visualization
+- **`utils/logger.py`**: Logging utilities
+- **`scripts/main.py`**: Command-line interface and experiment runner
+- **`scripts/sweep.py`**: Parameter sweep functionality
 
 ## Citation
 

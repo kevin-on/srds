@@ -6,9 +6,10 @@ from diffusers import DDIMScheduler, StableDiffusionPipeline, SchedulerMixin
 from PIL import Image
 from tqdm import tqdm
 
-from diffusion import diffusion_step, ddim_step_with_eta
-from srds import SRDS
-from utils import decode_latents_to_pil, save_images_as_grid
+from src.diffusion import diffusion_step, ddim_step_with_eta
+from src.srds import SRDS
+from utils.utils import decode_latents_to_pil, save_images_as_grid
+from utils.logger import get_logger, get_tqdm_logger
 
 
 class StochasticParareal(SRDS):
@@ -42,23 +43,29 @@ class StochasticParareal(SRDS):
                     generator,
                 ) for _ in range(num_samples - 1)
             ]
+        ]
+    def _sample_latents_dir(
+        self, 
+        num_samples: int,
+        latent: torch.Tensor,
+        direction: torch.Tensor,
+        # range: Union[torch.Tensor, float]
+    ) -> List[torch.Tensor]:
+
+        if num_samples < 1:
+            raise ValueError("num_samples must be at least 1")
+
+        return [
+            latent,
+            *[
+                latent + direction * i
+                    for i in [-0.15,-0.10,-0.05 -0.03 ,0.03, 0.05, 0.1,0.15]
+            ]
 
         ]
-        # if isinstance(std, torch.Tensor):
-        #     if std.shape != latents.shape:
-        #         raise ValueError("std must be the same shape as latents")
-        #     latent_std = std
-        # else:
-        #     latent_std = latents.std() * std
-        
-        # latent_std = 0.001
-        # return [
-        #     latents,
-        #     *[
-        #         torch.randn_like(latents) * latent_std + latents
-        #         for _ in range(num_samples - 1)
-        #     ],
-        # ]
+            
+
+    
 
     @torch.no_grad()
     def __call__(
@@ -100,11 +107,13 @@ class StochasticParareal(SRDS):
             )
 
         # Timestep setup
-        print("SRDS Algorithm Configuration:")
-        print(
+        get_logger().info("SParareal Algorithm Configuration:")
+        get_logger().info(
             f"  Coarse steps: {len(coarse_timesteps)} | timesteps: {coarse_timesteps}"
         )
-        print(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
+        get_logger().info(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
+        get_logger().info(f"  Num samples: {num_samples}")
+        get_logger().info(f"  Eta: {eta}")
 
         # Create a copy of the pipeline with the coarse scheduler
         pipe_coarse = StableDiffusionPipeline(
@@ -193,10 +202,6 @@ class StochasticParareal(SRDS):
         coarse_prediction_from_optimal: List[torch.Tensor] = [
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
         ]  # G_n(alpha_k^{n-1})
-        prev_abs_delta_coarse_prediction: List[torch.Tensor] = [
-            torch.zeros_like(initial_latents)
-            for _ in range(coarse_num_inference_steps + 1)
-        ]  # |G_n(U_{k-1}^{n-1}) - G_n(U_{k-2}^{n-1})|
 
         # Initialize previous solutions
         for i in range(1, coarse_num_inference_steps + 1):  # line 2 of Algorithm 1
@@ -235,22 +240,42 @@ class StochasticParareal(SRDS):
 
             # line 6 of Algorithm 1
             # cur_fine_prediction starts from prev_corrected_solution
-            for i in range(1, coarse_num_inference_steps + 1):
-                fine_trajectory_samples[i] = [
-                    TrajectorySegment(x, x)
-                    for x in self._sample_latents(
-                        num_samples=num_samples,
-                        x_t=prev_corrected_solution[i-1].clone(),
-                        x_t_minus_1=prev_corrected_solution[i].clone(),
-                        timestep=coarse_timesteps[i-1],
-                        scheduler=scheduler_coarse,
-                        eta=eta,
-                        generator = None,
-                    )
-                ]
+            sample_type = "ddim"
+            if sample_type == "ddim":
+                for i in range(1, coarse_num_inference_steps + 1):
+                    #FIXME
+                    if i == 1:
+                        fine_trajectory_samples[i] = [
+                            TrajectorySegment(x,x) 
+                            for x in [prev_corrected_solution[i-1].clone()]
+                       ]
+                    else:
+                        fine_trajectory_samples[i] = [
+                            TrajectorySegment(x, x)
+                            for x in self._sample_latents(
+                                num_samples=num_samples,
+                                x_t=prev_corrected_solution[i-2].clone(),
+                                x_t_minus_1=prev_corrected_solution[i-1].clone(),
+                                timestep=coarse_timesteps[i-2],
+                                scheduler=scheduler_coarse,
+                                eta=eta,
+                                generator = None,
+                            )
+                        ]
+            elif sample_type == "dir":
+                for i in range(1, coarse_num_inference_steps + 1):
+                    fine_trajectory_samples[i] = [
+                        TrajectorySegment(x, x)
+                        for x in self._sample_latents_dir(
+                            num_samples=num_samples,
+                            latent=prev_corrected_solution[i-1].clone(),
+                            direction=(prev_fine_prediction[i-1].end.clone()-coarse_prediction_from_optimal[i-1].clone())
+                        )
+                    ]
+                    
 
-            tqdm.write(
-                f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
+            get_tqdm_logger().write(
+                f"SParareal Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 timestep_start = coarse_timesteps[i - 1]
@@ -278,10 +303,10 @@ class StochasticParareal(SRDS):
                 min_idx = distances.index(min(distances))
                 cur_fine_prediction[i] = fine_trajectory_samples[i][min_idx]
 
-                tqdm.write(
+                get_tqdm_logger().write(
                     f"  Timestep {i}: Selected candidate {min_idx} (is_original: {min_idx == 0})"
                 )
-                tqdm.write(f"    Distances: {[f'{d:.6f}' for d in distances]}")
+                get_tqdm_logger().write(f"    Distances: {[f'{d:.6f}' for d in distances]}")
 
             # Compute coarse prediction from the start point of each optimal trajectory
             for i in range(1, coarse_num_inference_steps + 1):
@@ -295,8 +320,8 @@ class StochasticParareal(SRDS):
                     do_classifier_free_guidance,
                 )
 
-            tqdm.write(
-                f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing coarse sweep"
+            get_tqdm_logger().write(
+                f"SParareal Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing coarse sweep"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
                 cur_coarse_prediction[i] = diffusion_step(  # line 10 of Algorithm 1
@@ -333,19 +358,12 @@ class StochasticParareal(SRDS):
                     )
                 )
                 status = "CONVERGED" if l1_distance < tolerance else "continuing"
-                tqdm.write(
-                    f"SRDS Iteration {srds_iter+1}: L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
+                get_tqdm_logger().write(
+                    f"SParareal Iteration {srds_iter+1}: L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
                 )
 
                 if l1_distance < tolerance:
                     break
-
-            #FIXME
-            # Update prev_abs_delta_coarse_prediction (element-wise absolute difference)
-            prev_abs_delta_coarse_prediction = [
-                torch.abs(cur_coarse_prediction[i] - prev_coarse_prediction[i])
-                for i in range(coarse_num_inference_steps + 1)
-            ]
 
             # Update previous solutions (line 12 of Algorithm 1)
             prev_coarse_prediction[:] = cur_coarse_prediction
@@ -367,8 +385,8 @@ class StochasticParareal(SRDS):
                 - np.array(images, dtype=np.float32)
             )
         )
-        print(
-            f"SRDS Complete: Final L1 distance from DDIM ground truth = {l1_distance:.6f}"
+        get_logger().info(
+            f"SParareal Complete: Final L1 distance from DDIM ground truth = {l1_distance:.6f}"
         )
 
         return images

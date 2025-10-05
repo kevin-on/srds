@@ -8,8 +8,9 @@ from diffusers import DDIMScheduler, StableDiffusionPipeline
 from PIL import Image
 from tqdm import tqdm
 
-from diffusion import diffusion_step
-from utils import decode_latents_to_pil, save_images_as_grid
+from src.diffusion import diffusion_step
+from utils.utils import decode_latents_to_pil, save_images_as_grid
+from utils.logger import get_logger, get_tqdm_logger
 
 """
 Implementation of Self-Refining Diffusion Samplers (SRDS) algorithm.
@@ -81,11 +82,11 @@ class SRDS:
             )
 
         # Timestep setup
-        print("SRDS Algorithm Configuration:")
-        print(
+        get_logger().info("SRDS Algorithm Configuration:")
+        get_logger().info(
             f"  Coarse steps: {len(coarse_timesteps)} | timesteps: {coarse_timesteps}"
         )
-        print(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
+        get_logger().info(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
 
         # Create a copy of the pipeline with the coarse scheduler
         pipe_coarse = StableDiffusionPipeline(
@@ -199,7 +200,7 @@ class SRDS:
             for i in range(1, coarse_num_inference_steps + 1):
                 cur_fine_prediction[i] = prev_corrected_solution[i - 1].clone()
 
-            tqdm.write(
+            get_tqdm_logger().write(
                 f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
@@ -218,7 +219,7 @@ class SRDS:
                     do_classifier_free_guidance=do_classifier_free_guidance,
                 )
 
-            tqdm.write(
+            get_tqdm_logger().write(
                 f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing coarse sweep"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
@@ -241,11 +242,11 @@ class SRDS:
                     torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
                 )
             trajectory_errors.append(timestep_errors)
-
+            
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
             save_images_as_grid(images, f"{output_dir}/srds_iteration_{srds_iter}.png")
-
+            
             # Check convergence (line 13-14 of Algorithm 1)
             if prev_images is not None:
 
@@ -256,7 +257,7 @@ class SRDS:
                     )
                 )
                 status = "CONVERGED" if l1_distance < tolerance else "continuing"
-                tqdm.write(
+                get_tqdm_logger().write(
                     f"SRDS Iteration {srds_iter+1}: L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
                 )
 
@@ -283,7 +284,7 @@ class SRDS:
                 - np.array(images, dtype=np.float32)
             )
         )
-        print(
+        get_logger().info(
             f"SRDS Complete: Final L1 distance from DDIM ground truth = {l1_distance:.6f}"
         )
 
@@ -354,11 +355,11 @@ class SRDS:
             coarse_img.tobytes() == init_img.tobytes()
             for coarse_img, init_img in zip(coarse_output.images, initialized_images)
         ):
-            print(
+            get_logger().info(
                 "PASS: Initialization verified - generated image matches DDIM coarse baseline"
             )
         else:
-            print(
+            get_logger().warning(
                 "FAIL: Initialization error - generated image differs from DDIM baseline"
             )
 

@@ -1,12 +1,16 @@
 import argparse
 import os
+import sys
 from datetime import datetime
 
 import torch
 
-from sparareal import StochasticParareal
-from srds import SRDS
-from logger import setup_logging, log_info
+# Add parent directory to path so we can import src and utils
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from src.sparareal import StochasticParareal
+from src.srds import SRDS
+from utils.logger import setup_logging, log_info
 
 
 def set_seed(seed: int):
@@ -18,12 +22,14 @@ def set_seed(seed: int):
 
 
 def parse_prompts(prompts_input):
-    """Parse prompts from text file (one prompt per line)"""
-    if not os.path.isfile(prompts_input):
-        raise ValueError(f"Prompts file not found: {prompts_input}")
-
-    with open(prompts_input, "r") as f:
-        return [line.strip() for line in f if line.strip()]
+    """Parse prompts from text file (one prompt per line) or return single prompt"""
+    if os.path.isfile(prompts_input):
+        # Input is a file path
+        with open(prompts_input, "r") as f:
+            return [line.strip() for line in f if line.strip()]
+    else:
+        # Input is a direct prompt string
+        return [prompts_input.strip()]
 
 
 def parse_args():
@@ -34,7 +40,7 @@ def parse_args():
         "--prompts",
         "-p",
         type=str,
-        help="Path to text file (one prompt per line)",
+        help="Path to text file (one prompt per line) or direct prompt string",
     )
     parser.add_argument(
         "--output-dir",
@@ -76,7 +82,7 @@ def parse_args():
         "--num-samples",
         "-ns",
         type=int,
-        default=1,
+        default=3,
         help="Number of samples for sparareal algorithm (ignored for srds)",
     )
     parser.add_argument(

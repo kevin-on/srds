@@ -4,6 +4,9 @@ __pycache__/
 # output
 output/
 
+# tests and results
+tests/
+
 # Claude Code
 .claude/
 CLAUDE.md
