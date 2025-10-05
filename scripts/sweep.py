@@ -6,6 +6,7 @@ import itertools
 from datetime import datetime
 from typing import List, Dict, Any
 import pandas as pd
+import numpy as np
 
 import torch
 
@@ -15,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.sparareal import StochasticParareal
 from src.srds import SRDS
 from utils.logger import setup_logging, log_info
+from utils.metrics import get_convergence_metrics, get_segment_selection_metrics
 
 
 def set_seed(seed: int):
@@ -76,11 +78,11 @@ def parse_args():
         help="List of num_samples to test (default: 1 5 10)",
     )
     parser.add_argument(
-        "--eta",
+        "--sample-type",
         nargs="+",
-        type=float,
-        default=[0.01, 0.1, 1.0],
-        help="List of eta values to test (default: 0.01 0.1 1.0)",
+        type=str,
+        default=["ddim,eta=0.01", "ddim,eta=0.1", "ddim,eta=1.0"],
+        help="List of sample types to test (default: ddim,eta=0.01 ddim,eta=0.1 ddim,eta=1.0)",
     )
     parser.add_argument(
         "--tolerance",
@@ -128,16 +130,16 @@ def generate_parameter_combinations(args) -> List[Dict[str, Any]]:
     
     if args.algorithm == "sparareal":
         num_samples = args.num_samples
-        eta_values = args.eta
+        sample_types = args.sample_type
     else:
         num_samples = [1]  # SRDS doesn't use num_samples
-        eta_values = [1.0]  # SRDS doesn't use eta
+        sample_types = ["ddim,eta=1.0"]  # SRDS doesn't use sample_type
     
     tolerance_values = args.tolerance
     
     # Generate all combinations
     combinations = []
-    for cs, fs, ns, eta, tol in itertools.product(coarse_steps, fine_steps, num_samples, eta_values, tolerance_values):
+    for cs, fs, ns, sample_type, tol in itertools.product(coarse_steps, fine_steps, num_samples, sample_types, tolerance_values):
         # Skip invalid combinations
         if fs % cs != 0:
             continue
@@ -146,7 +148,7 @@ def generate_parameter_combinations(args) -> List[Dict[str, Any]]:
             'coarse_steps': cs,
             'fine_steps': fs,
             'num_samples': ns,
-            'eta': eta,
+            'sample_type': sample_type,
             'tolerance': tol,
             'guidance_scale': args.guidance_scale,
             'height': args.height,
@@ -176,7 +178,9 @@ def run_single_experiment(
     # Create experiment-specific output directory
     exp_name = f"exp_{experiment_id:03d}_cs{params['coarse_steps']}-fs{params['fine_steps']}"
     if algorithm == "sparareal":
-        exp_name += f"_ns{params['num_samples']}_eta{params['eta']}"
+        # Clean sample_type for directory name (replace commas and equals with underscores)
+        clean_sample_type = params['sample_type'].replace(',', '_').replace('=', '_')
+        exp_name += f"_ns{params['num_samples']}_{clean_sample_type}"
     exp_name += f"_tol{params['tolerance']}"
     
     exp_output_dir = os.path.join(base_output_dir, exp_name)
@@ -217,7 +221,7 @@ def run_single_experiment(
                 num_samples=params['num_samples'],
                 tolerance=params['tolerance'],
                 guidance_scale=params['guidance_scale'],
-                eta=params['eta'],
+                sample_type=params['sample_type'],
                 height=params['height'],
                 width=params['width'],
                 generator=generator,
@@ -250,23 +254,25 @@ def load_experiment_results(exp_output_dir: str, params: Dict[str, Any]) -> Dict
         'status': 'completed'
     }
     
-    # Try to load trajectory errors
-    trajectory_file = os.path.join(exp_output_dir, "trajectory_errors_table.csv")
-    if os.path.exists(trajectory_file):
-        try:
-            df = pd.read_csv(trajectory_file)
-            results['trajectory_errors'] = df.to_dict('records')
-            results['final_error'] = df.iloc[-1]['Final_Image_Error'] if 'Final_Image_Error' in df.columns else None
-        except Exception as e:
-            print(f"Warning: Could not load trajectory errors: {e}")
+    # Load convergence metrics
+    convergence_metrics = get_convergence_metrics(exp_output_dir)
+    results.update(convergence_metrics)
     
-    # Try to load log file for additional info
+    # Load segment selection metrics for sparareal
+    if params.get('algorithm') == 'sparareal' or 'sparareal' in exp_output_dir:
+        segment_metrics = get_segment_selection_metrics(exp_output_dir)
+        if segment_metrics:
+            results['alternative_selection_rate'] = segment_metrics['alternative_selection_rate']
+            results['original_selection_rate'] = segment_metrics['original_selection_rate']
+    
+    # Try to load L1 distance from log file
     log_file = os.path.join(exp_output_dir, "log.txt")
     if os.path.exists(log_file):
         try:
             with open(log_file, 'r') as f:
                 log_content = f.read()
-                # Extract key information from log
+                
+                # Extract L1 distance information
                 if "Final L1 distance from DDIM ground truth" in log_content:
                     for line in log_content.split('\n'):
                         if "Final L1 distance from DDIM ground truth" in line:
@@ -323,18 +329,32 @@ def save_sweep_summary(results: List[Dict[str, Any]], output_dir: str, prompt: s
             }, f, indent=2)
         print(f"Detailed results saved to: {json_file}")
         
-        # Print best results
-        if 'l1_distance' in df.columns:
-            best_result = df.loc[df['l1_distance'].idxmin()]
-            print(f"\nBest result (lowest L1 distance: {best_result['l1_distance']:.6f}):")
-            print(f"  Coarse steps: {best_result['coarse_steps']}")
-            print(f"  Fine steps: {best_result['fine_steps']}")
-            if 'num_samples' in best_result:
-                print(f"  Num samples: {best_result['num_samples']}")
-            if 'eta' in best_result:
-                print(f"  Eta: {best_result['eta']}")
-            print(f"  Tolerance: {best_result['tolerance']}")
-            print(f"  Output dir: {best_result['output_dir']}")
+        # Print key results summary
+        print(f"\n=== SWEEP SUMMARY ===")
+        
+        # Show results table
+        print(f"\nResults Summary:")
+        key_cols = ['coarse_steps', 'fine_steps', 'num_samples', 'sample_type', 'tolerance']
+        if 'total_iterations' in df.columns:
+            key_cols.append('total_iterations')
+        if 'alternative_selection_rate' in df.columns:
+            key_cols.append('alternative_selection_rate')
+        
+        available_cols = [col for col in key_cols if col in df.columns]
+        print(df[available_cols].to_string(index=False))
+        
+        # Best results
+        if 'total_iterations' in df.columns and df['total_iterations'].notna().any():
+            best_convergence = df.loc[df['total_iterations'].idxmin()]
+            print(f"\n⚡ Fastest Convergence: {best_convergence['total_iterations']} iterations")
+            print(f"  Settings: cs={best_convergence['coarse_steps']}, fs={best_convergence['fine_steps']}, ns={best_convergence.get('num_samples', 'N/A')}, sample_type={best_convergence.get('sample_type', 'N/A')}")
+        
+        if 'alternative_selection_rate' in df.columns and df['alternative_selection_rate'].notna().any():
+            avg_alt_rate = df['alternative_selection_rate'].mean()
+            print(f"\n🎯 Average Alternative Selection Rate: {avg_alt_rate:.1%}")
+            
+            most_exploratory = df.loc[df['alternative_selection_rate'].idxmax()]
+            print(f"  Most exploratory: {most_exploratory['alternative_selection_rate']:.1%} (cs={most_exploratory['coarse_steps']}, ns={most_exploratory.get('num_samples', 'N/A')}, sample_type={most_exploratory.get('sample_type', 'N/A')})")
 
 
 def main():
@@ -368,7 +388,7 @@ def main():
                 'coarse_steps': args.coarse_steps,
                 'fine_steps': args.fine_steps,
                 'num_samples': args.num_samples,
-                'eta': args.eta,
+                'sample_type': args.sample_type,
                 'tolerance': args.tolerance,
             },
             'fixed_parameters': {

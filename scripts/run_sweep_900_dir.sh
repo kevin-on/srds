@@ -4,14 +4,14 @@
 echo "Starting parameter sweep for SParareal..."
 
 # Basic sweep with different parameter combinations
-python sweep.py \
+python scripts/sweep.py \
     --prompt "a beautiful landscape with mountains and a lake" \
     --output-dir "./output/sweeps" \
     --algorithm sparareal \
-    --coarse-steps 10 \
-    --fine-steps 100 \
+    --coarse-steps 30 \
+    --fine-steps 900 \
     --num-samples 1 5 10 \
-    --eta 0.01 0.005 \
+    --sample-type "dir,scale=0.05" "dir,scale=0.1" "dir,eta=0.2" \
     --tolerance 0.1
 
 echo "Sweep completed!"

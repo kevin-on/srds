@@ -6,6 +6,38 @@ from diffusers import StableDiffusionPipeline
 from PIL import Image
 
 
+def parse_sample_type(sample_type_str):
+    """Parse sample_type string into method and kwargs dict
+    
+    Examples:
+        "ddim,eta=0.5" -> {"method": "ddim", "kwargs": {"eta": 0.5}}
+        "dir,step=0.1,range=0.5" -> {"method": "dir", "kwargs": {"step": 0.1, "range": 0.5}}
+    """
+    parts = sample_type_str.split(',')
+    method = parts[0].strip()
+    kwargs = {}
+    
+    if len(parts) > 1:
+        for part in parts[1:]:
+            part = part.strip()
+            
+            # Named parameter: "eta=0.5"
+            key, value = part.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+            
+            # Try to convert to appropriate type
+            try:
+                if '.' in value:
+                    kwargs[key] = float(value)
+                else:
+                    kwargs[key] = int(value)
+            except ValueError:
+                kwargs[key] = value
+    
+    return {"method": method, "kwargs": kwargs}
+
+
 def decode_latents_to_pil(
     latents: torch.Tensor, pipe: StableDiffusionPipeline
 ) -> List[Image.Image]:

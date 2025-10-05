@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from src.diffusion import diffusion_step, ddim_step_with_eta
 from src.srds import SRDS
-from utils.utils import decode_latents_to_pil, save_images_as_grid
+from utils.utils import decode_latents_to_pil, save_images_as_grid, parse_sample_type
 from utils.logger import get_logger, get_tqdm_logger
 
 
@@ -16,7 +16,7 @@ class StochasticParareal(SRDS):
     
 
     @torch.no_grad()
-    def _sample_latents(
+    def _sample_latents_ddim(
         self,
         num_samples: int,
         x_t: torch.Tensor, 
@@ -44,28 +44,28 @@ class StochasticParareal(SRDS):
                 ) for _ in range(num_samples - 1)
             ]
         ]
+
     def _sample_latents_dir(
         self, 
         num_samples: int,
         latent: torch.Tensor,
         direction: torch.Tensor,
-        # range: Union[torch.Tensor, float]
+        scale: float,
     ) -> List[torch.Tensor]:
 
         if num_samples < 1:
             raise ValueError("num_samples must be at least 1")
 
+        # Generate correction factors around 0 with the given scale
+        factors = np.linspace(-scale, scale, num_samples)
+        if 0.0 in factors:
+            factors = [0.0] + [f for f in factors if f != 0.0]
+        
         return [
-            latent,
-            *[
-                latent + direction * i
-                    for i in [-0.15,-0.10,-0.05 -0.03 ,0.03, 0.05, 0.1,0.15]
-            ]
-
+            latent + direction * factor
+            for factor in factors
         ]
             
-
-    
 
     @torch.no_grad()
     def __call__(
@@ -76,7 +76,7 @@ class StochasticParareal(SRDS):
         num_samples: int,
         tolerance: float,
         guidance_scale: float = 7.5,
-        eta: float = 1.0, 
+        sample_type: str = "ddim,eta=1.0", #"ddim,eta=" / "dir,shoot="
         height: int = 512,
         width: int = 512,
         generator: Optional[torch.Generator] = None,
@@ -113,7 +113,7 @@ class StochasticParareal(SRDS):
         )
         get_logger().info(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
         get_logger().info(f"  Num samples: {num_samples}")
-        get_logger().info(f"  Eta: {eta}")
+        get_logger().info(f"  Sample type: {sample_type}")
 
         # Create a copy of the pipeline with the coarse scheduler
         pipe_coarse = StableDiffusionPipeline(
@@ -240,8 +240,8 @@ class StochasticParareal(SRDS):
 
             # line 6 of Algorithm 1
             # cur_fine_prediction starts from prev_corrected_solution
-            sample_type = "ddim"
-            if sample_type == "ddim":
+            sample_config = parse_sample_type(sample_type)
+            if sample_config["method"] == "ddim":
                 for i in range(1, coarse_num_inference_steps + 1):
                     #FIXME
                     if i == 1:
@@ -252,24 +252,25 @@ class StochasticParareal(SRDS):
                     else:
                         fine_trajectory_samples[i] = [
                             TrajectorySegment(x, x)
-                            for x in self._sample_latents(
+                            for x in self._sample_latents_ddim(
                                 num_samples=num_samples,
                                 x_t=prev_corrected_solution[i-2].clone(),
                                 x_t_minus_1=prev_corrected_solution[i-1].clone(),
                                 timestep=coarse_timesteps[i-2],
                                 scheduler=scheduler_coarse,
-                                eta=eta,
                                 generator = None,
+                                **sample_config["kwargs"]
                             )
                         ]
-            elif sample_type == "dir":
+            elif sample_config["method"] == "dir":
                 for i in range(1, coarse_num_inference_steps + 1):
                     fine_trajectory_samples[i] = [
                         TrajectorySegment(x, x)
                         for x in self._sample_latents_dir(
                             num_samples=num_samples,
                             latent=prev_corrected_solution[i-1].clone(),
-                            direction=(prev_fine_prediction[i-1].end.clone()-coarse_prediction_from_optimal[i-1].clone())
+                            direction=(prev_fine_prediction[i-1].end.clone()-coarse_prediction_from_optimal[i-1].clone()),
+                            **sample_config["kwargs"]
                         )
                     ]
                     

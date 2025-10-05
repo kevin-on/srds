@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.sparareal import StochasticParareal
 from src.srds import SRDS
 from utils.logger import setup_logging, log_info
+from utils.metrics import save_key_metrics_summary
 
 
 def set_seed(seed: int):
@@ -30,7 +31,6 @@ def parse_prompts(prompts_input):
     else:
         # Input is a direct prompt string
         return [prompts_input.strip()]
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run SRDS diffusion algorithm")
@@ -86,12 +86,12 @@ def parse_args():
         help="Number of samples for sparareal algorithm (ignored for srds)",
     )
     parser.add_argument(
-        "--eta",
-        type=float,
-        default=1.0,
+        "--sample_type",
+        "-st",
+        type=str,
+        default="ddim,eta=1.0", 
         help="Stochasticity",
     )
-
     # Optional arguments
     parser.add_argument(
         "--guidance-scale",
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     # Create timestamped subdirectory with parameters
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.algorithm == "sparareal":
-        subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}_ns{args.num_samples}_eta{args.eta}"
+        subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}_{args.sample_type}-{args.num_samples}"
     else:
         subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}"
     
@@ -149,16 +149,16 @@ if __name__ == "__main__":
     log_info(f"Algorithm: {args.algorithm}")
     log_info(f"Output directory: {args.output_dir}")
     log_info(f"Timestamped output directory: {timestamped_output_dir}")
-    log_info(f"Log file: {log_file_path}")
-    log_info(f"Prompts file: {args.prompts}")
+    log_info(f"Prompts: {args.prompts}")
     log_info(f"Coarse steps: {args.coarse_steps}")
     log_info(f"Fine steps: {args.fine_steps}")
     log_info(f"Tolerance: {args.tolerance}")
     log_info(f"Seed: {args.seed}")
     log_info(f"Model: {args.model}")
+
     if args.algorithm == "sparareal":
         log_info(f"Num samples: {args.num_samples}")
-        log_info(f"Eta: {args.eta}")
+        log_info(f"Sample type: {args.sample_type}")
     
     log_info(f"Loaded {len(prompts)} prompts")
 
@@ -189,7 +189,7 @@ if __name__ == "__main__":
             num_samples=args.num_samples,
             tolerance=args.tolerance,
             guidance_scale=args.guidance_scale,
-            eta=args.eta,
+            sample_type=args.sample_type,
             height=args.height,
             width=args.width,
             generator=generator,
@@ -197,3 +197,6 @@ if __name__ == "__main__":
         )
     
     log_info("Execution completed successfully!")
+    
+    # Save key metrics summary
+    save_key_metrics_summary(timestamped_output_dir, args.algorithm)
