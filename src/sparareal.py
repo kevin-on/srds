@@ -56,6 +56,8 @@ class StochasticParareal(SRDS):
         if num_samples < 1:
             raise ValueError("num_samples must be at least 1")
 
+        if num_samples == 1:
+            return [latent]
         # Generate correction factors around 0 with the given scale
         factors = np.linspace(-scale, scale, num_samples)
         if 0.0 in factors:
