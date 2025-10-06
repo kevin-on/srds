@@ -101,6 +101,23 @@ output/
 - **`scripts/main.py`**: Command-line interface and experiment runner
 - **`scripts/sweep.py`**: Parameter sweep functionality
 
+### Code Formatting
+
+This project uses [Ruff](https://docs.astral.sh/ruff/) for code formatting and linting. Before committing changes:
+
+```bash
+# Format code automatically
+ruff format .
+
+# Check for linting issues
+ruff check .
+
+# Auto-fix issues where possible
+ruff check --fix .
+```
+
+Ruff is configured in `pyproject.toml` with a 100-character line length and targets Python 3.8+.
+
 ## Citation
 
 If you use this implementation in your research, please cite the original paper:
