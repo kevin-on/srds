@@ -14,8 +14,8 @@ from typing import List, Tuple
 import numpy as np
 import torch
 
-from sparareal import StochasticParareal
-from srds import SRDS
+from src.sparareal import StochasticParareal
+from src.srds import SRDS
 
 
 def setup_test_environment() -> Tuple[str, dict]:
@@ -94,9 +94,9 @@ def test_srds_sparareal_equivalence():
     try:
         # Set up consistent random seed for reproducibility
         torch.manual_seed(42)
-        generator = torch.Generator().manual_seed(42)
+        torch.Generator().manual_seed(42)
 
-        print(f"Test parameters:")
+        print("Test parameters:")
         for key, value in test_params.items():
             print(f"  {key}: {value}")
         print(f"Output directory: {temp_dir}")
@@ -163,10 +163,12 @@ def test_srds_sparareal_equivalence():
         sparareal_errors = extract_trajectory_errors(sparareal_output_dir)
 
         print(
-            f"SRDS trajectory shape: {len(srds_errors)} iterations x {len(srds_errors[0]) if srds_errors else 0} timesteps"
+            f"SRDS trajectory shape: {len(srds_errors)} iterations x "
+            f"{len(srds_errors[0]) if srds_errors else 0} timesteps"
         )
         print(
-            f"SParareal trajectory shape: {len(sparareal_errors)} iterations x {len(sparareal_errors[0]) if sparareal_errors else 0} timesteps"
+            f"SParareal trajectory shape: {len(sparareal_errors)} iterations x "
+            f"{len(sparareal_errors[0]) if sparareal_errors else 0} timesteps"
         )
 
         # Compare trajectories
@@ -180,9 +182,7 @@ def test_srds_sparareal_equivalence():
 
         if trajectories_match:
             print("✅ PASS: Trajectory errors match within tolerance!")
-            print(
-                "   SRDS and SParareal produce identical error trajectories when num_samples=1"
-            )
+            print("   SRDS and SParareal produce identical error trajectories when num_samples=1")
         else:
             print("❌ FAIL: Trajectory errors do not match!")
             print(f"   Found {len(differences)} differences:")
@@ -191,28 +191,26 @@ def test_srds_sparareal_equivalence():
                 differences[:10]
             ):  # Show first 10 differences
                 if iter_idx == -1:
-                    print(
-                        f"     {i+1}. Different number of iterations: difference = {diff}"
-                    )
+                    print(f"     {i + 1}. Different number of iterations: difference = {diff}")
                 elif timestep_idx == -1:
                     print(
-                        f"     {i+1}. Iteration {iter_idx}: Different number of timesteps: difference = {diff}"
+                        f"     {i + 1}. Iteration {iter_idx}: "
+                        f"Different number of timesteps: difference = {diff}"
                     )
                 else:
                     print(
-                        f"     {i+1}. Iteration {iter_idx}, Timestep {timestep_idx}: difference = {diff:.2e}"
+                        f"     {i + 1}. Iteration {iter_idx}, Timestep {timestep_idx}: "
+                        f"difference = {diff:.2e}"
                     )
 
             if len(differences) > 10:
                 print(f"     ... and {len(differences) - 10} more differences")
 
         # Compare final images numerically
-        print(f"\nFinal Image Comparison:")
+        print("\nFinal Image Comparison:")
         if len(srds_images) == len(sparareal_images):
             total_pixel_diff = 0
-            for i, (srds_img, sparareal_img) in enumerate(
-                zip(srds_images, sparareal_images)
-            ):
+            for i, (srds_img, sparareal_img) in enumerate(zip(srds_images, sparareal_images)):
                 srds_array = np.array(srds_img, dtype=np.float32)
                 sparareal_array = np.array(sparareal_img, dtype=np.float32)
                 pixel_diff = np.mean(np.abs(srds_array - sparareal_array))
@@ -230,7 +228,8 @@ def test_srds_sparareal_equivalence():
                 print("❌ FAIL: Final images differ significantly!")
         else:
             print(
-                f"❌ FAIL: Different number of images: SRDS={len(srds_images)}, SParareal={len(sparareal_images)}"
+                f"❌ FAIL: Different number of images: SRDS={len(srds_images)}, "
+                f"SParareal={len(sparareal_images)}"
             )
 
         # Print summary
@@ -242,7 +241,8 @@ def test_srds_sparareal_equivalence():
             print("✅ OVERALL RESULT: PASS")
             print("   SRDS and SParareal produce equivalent results when num_samples=1")
             print(
-                "   This confirms that SParareal correctly reduces to SRDS in the single-sample case."
+                "   This confirms that SParareal correctly reduces to SRDS in the "
+                "single-sample case."
             )
         else:
             print("❌ OVERALL RESULT: FAIL")
@@ -268,20 +268,6 @@ def test_srds_sparareal_equivalence():
 
 
 if __name__ == "__main__":
-    # Ensure we're in the right directory and have required dependencies
-    try:
-        import diffusers
-        import einops
-        import matplotlib
-        import pandas
-        import torch
-        import tqdm
-        import transformers
-    except ImportError as e:
-        print(f"❌ Missing dependency: {e}")
-        print("Please run: pip install -r requirements.txt")
-        exit(1)
-
     # Run the test
     success = test_srds_sparareal_equivalence()
     exit(0 if success else 1)

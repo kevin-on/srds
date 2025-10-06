@@ -3,6 +3,7 @@ from typing import Optional, Union
 import torch
 from diffusers import SchedulerMixin, UNet2DConditionModel
 
+
 @torch.no_grad()
 def ddim_step_with_eta(
     x_t: torch.Tensor,
@@ -44,10 +45,10 @@ def ddim_step_with_eta(
 
     # Get step index and alpha values from scheduler
     step_index = (scheduler.timesteps == timestep_val).nonzero().item()
-    
+
     # Get alpha values at current and previous timesteps
     alpha_prod_t = scheduler.alphas_cumprod[timestep_val]
-    
+
     if step_index == len(scheduler.timesteps) - 1:
         alpha_prod_t_prev = torch.tensor(1.0, device=x_t.device, dtype=x_t.dtype)
     else:
@@ -58,22 +59,31 @@ def ddim_step_with_eta(
     # From DDIM equations:
     # x_t = sqrt(α_t) * x_0 + sqrt(1-α_t) * ε
     # x_{t-1} = sqrt(α_{t-1}) * x_0 + sqrt(1-α_{t-1}) * ε (for eta=0)
-    
-    sqrt_alpha_prod_t = alpha_prod_t ** 0.5
+
+    sqrt_alpha_prod_t = alpha_prod_t**0.5
     sqrt_one_minus_alpha_prod_t = (1 - alpha_prod_t) ** 0.5
-    sqrt_alpha_prod_t_prev = alpha_prod_t_prev ** 0.5
+    sqrt_alpha_prod_t_prev = alpha_prod_t_prev**0.5
     sqrt_one_minus_alpha_prod_t_prev = (1 - alpha_prod_t_prev) ** 0.5
-    
-    denominator = sqrt_alpha_prod_t_prev * sqrt_one_minus_alpha_prod_t - sqrt_alpha_prod_t * sqrt_one_minus_alpha_prod_t_prev
-    
+
+    denominator = (
+        sqrt_alpha_prod_t_prev * sqrt_one_minus_alpha_prod_t
+        - sqrt_alpha_prod_t * sqrt_one_minus_alpha_prod_t_prev
+    )
+
     if abs(denominator) < 1e-8:
         # Fallback for numerical stability
-        pred_x0 = (x_t_minus_1 - sqrt_one_minus_alpha_prod_t_prev * 
-                  (x_t - sqrt_alpha_prod_t * x_t_minus_1 / sqrt_alpha_prod_t_prev) / sqrt_one_minus_alpha_prod_t) / sqrt_alpha_prod_t_prev
+        pred_x0 = (
+            x_t_minus_1
+            - sqrt_one_minus_alpha_prod_t_prev
+            * (x_t - sqrt_alpha_prod_t * x_t_minus_1 / sqrt_alpha_prod_t_prev)
+            / sqrt_one_minus_alpha_prod_t
+        ) / sqrt_alpha_prod_t_prev
     else:
         # More stable solution
-        pred_x0 = (x_t_minus_1 * sqrt_one_minus_alpha_prod_t - x_t * sqrt_one_minus_alpha_prod_t_prev) / denominator
-    
+        pred_x0 = (
+            x_t_minus_1 * sqrt_one_minus_alpha_prod_t - x_t * sqrt_one_minus_alpha_prod_t_prev
+        ) / denominator
+
     # Extract noise prediction
     noise_pred = (x_t - sqrt_alpha_prod_t * pred_x0) / sqrt_one_minus_alpha_prod_t
 
@@ -81,10 +91,10 @@ def ddim_step_with_eta(
     # variance = σ_t^2 = η^2 * β_{t-1} * (1 - α_t / α_{t-1}) / (1 - α_t)
     beta_prod_t = 1 - alpha_prod_t
     beta_prod_t_prev = 1 - alpha_prod_t_prev
-    
+
     # Standard DDIM variance calculation
     variance = (beta_prod_t_prev / beta_prod_t) * (1 - alpha_prod_t / alpha_prod_t_prev)
-    std_dev_t = eta * (variance ** 0.5)
+    std_dev_t = eta * (variance**0.5)
 
     # Generate random noise
     if generator is not None:
@@ -95,16 +105,14 @@ def ddim_step_with_eta(
     # Compute the new sample with stochasticity
     # Following DDIM paper: x_{t-1} = sqrt(α_{t-1}) * x_0 + sqrt(1-α_{t-1}-σ_t^2) * ε + σ_t * z
     # where z is random noise
-    
+
     # Direction pointing to x_t (for DDIM deterministic part)
-    pred_sample_direction = (1 - alpha_prod_t_prev - std_dev_t ** 2) ** 0.5 * noise_pred
-    
+    pred_sample_direction = (1 - alpha_prod_t_prev - std_dev_t**2) ** 0.5 * noise_pred
+
     # Combine deterministic and stochastic parts
     prev_sample = sqrt_alpha_prod_t_prev * pred_x0 + pred_sample_direction + std_dev_t * noise
-    
+
     return prev_sample
-
-
 
 
 @torch.no_grad()
@@ -126,8 +134,9 @@ def diffusion_step(
 
     Args:
         timestep_end: Optional end timestep. When provided, multiple diffusion steps
-                     will be executed from timestep up to but not including timestep_end (exclusive).
-                     Use timestep_end=-1 to process until the very last timestep.
+                     will be executed from timestep up to but not including
+                     timestep_end (exclusive). Use timestep_end=-1 to process
+                     until the very last timestep.
     """
     # Convert timesteps to int for easier comparison
     timestep_val = timestep.item() if isinstance(timestep, torch.Tensor) else timestep
@@ -139,10 +148,10 @@ def diffusion_step(
         # Get start index
         try:
             start_idx = scheduler_timesteps.index(timestep_val)
-        except ValueError:
+        except ValueError as e:
             raise ValueError(
                 f"Start timestep {timestep_val} not found in scheduler timesteps"
-            )
+            ) from e
 
         # Handle different timestep_end cases
         if timestep_end == -1:
@@ -150,21 +159,20 @@ def diffusion_step(
             end_idx = len(scheduler_timesteps)
         else:
             timestep_end_val = (
-                timestep_end.item()
-                if isinstance(timestep_end, torch.Tensor)
-                else timestep_end
+                timestep_end.item() if isinstance(timestep_end, torch.Tensor) else timestep_end
             )
             try:
                 end_idx = scheduler_timesteps.index(timestep_end_val)
-            except ValueError:
+            except ValueError as e:
                 raise ValueError(
                     f"End timestep {timestep_end_val} not found in scheduler timesteps"
-                )
+                ) from e
 
         # Ensure we're going in the right direction (start_idx < end_idx for denoising)
         if start_idx >= end_idx:
             raise ValueError(
-                f"Invalid timestep range: start index {start_idx} must be less than end index {end_idx}"
+                f"Invalid timestep range: start index {start_idx} "
+                f"must be less than end index {end_idx}"
             )
 
         # Run multiple diffusion steps (exclusive of end_idx)
@@ -221,9 +229,7 @@ def _single_diffusion_step(
         timestep = timestep.to(latents.device)
 
     # expand the latents if we are doing classifier free guidance
-    latent_model_input = (
-        torch.cat([latents] * 2) if do_classifier_free_guidance else latents
-    )
+    latent_model_input = torch.cat([latents] * 2) if do_classifier_free_guidance else latents
 
     latent_model_input = scheduler.scale_model_input(latent_model_input, timestep)
 
@@ -238,9 +244,7 @@ def _single_diffusion_step(
     # perform guidance
     if do_classifier_free_guidance:
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (
-            noise_pred_text - noise_pred_uncond
-        )
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
     latents = scheduler.step(noise_pred, timestep, latents, return_dict=False)[0]
     return latents
@@ -271,7 +275,7 @@ def diffusion_step_batched(
 
     # Validate input
     if not latents.shape[0] == timesteps.shape[0]:
-        raise ValueError(f"Latents and timesteps must have the same batch size")
+        raise ValueError("Latents and timesteps must have the same batch size")
 
     timesteps = timesteps.to(latents.device)
 
@@ -285,9 +289,7 @@ def diffusion_step_batched(
 
     # expand the latents if we are doing classifier free guidance
     latent_model_input = (
-        torch.cat([latent_model_input] * 2)
-        if do_classifier_free_guidance
-        else latent_model_input
+        torch.cat([latent_model_input] * 2) if do_classifier_free_guidance else latent_model_input
     )
 
     # expand the timesteps
@@ -314,11 +316,10 @@ def diffusion_step_batched(
     # perform guidance
     if do_classifier_free_guidance:
         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-        noise_pred = noise_pred_uncond + guidance_scale * (
-            noise_pred_text - noise_pred_uncond
-        )
+        noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
-    # TODO: Consider parallelizing this. Default scheduler.step function only supports single timestep.
+    # TODO: Consider parallelizing this. Default scheduler.step function only
+    # supports single timestep.
     for i in range(latents.shape[0]):
         latents[i : i + 1] = scheduler.step(
             noise_pred[i : i + 1],
@@ -349,7 +350,7 @@ def diffusion_step_sequential(
     """
     # Validate input
     if not latents.shape[0] == timesteps.shape[0]:
-        raise ValueError(f"Latents and timesteps must have the same batch size")
+        raise ValueError("Latents and timesteps must have the same batch size")
 
     timesteps = timesteps.to(latents.device)
 

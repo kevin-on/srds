@@ -9,8 +9,8 @@ from PIL import Image
 from tqdm import tqdm
 
 from src.diffusion import diffusion_step
-from utils.utils import decode_latents_to_pil, save_images_as_grid
 from utils.logger import get_logger, get_tqdm_logger
+from utils.utils import decode_latents_to_pil, save_images_as_grid
 
 """
 Implementation of Self-Refining Diffusion Samplers (SRDS) algorithm.
@@ -77,9 +77,7 @@ class SRDS:
         coarse_timesteps = scheduler_coarse.timesteps
         fine_timesteps = scheduler_fine.timesteps
         if not all(t in fine_timesteps for t in coarse_timesteps):
-            raise ValueError(
-                "The coarse timesteps are not a subset of the fine timesteps"
-            )
+            raise ValueError("The coarse timesteps are not a subset of the fine timesteps")
 
         # Timestep setup
         get_logger().info("SRDS Algorithm Configuration:")
@@ -186,28 +184,26 @@ class SRDS:
             output_dir,
         )
 
-        trajectory_errors: List[List[float]] = (
-            []
-        )  # [iteration][timestep] error matrix for convergence analysis
+        trajectory_errors: List[
+            List[float]
+        ] = []  # [iteration][timestep] error matrix for convergence analysis
         prev_images: Optional[List[Image.Image]] = (
             None  # Previous final image for L1 convergence check
         )
         for srds_iter in tqdm(
             range(coarse_num_inference_steps), desc="SRDS Iterations"
         ):  # line 6 of Algorithm 1
-
             # cur_fine_prediction starts from prev_corrected_solution
             for i in range(1, coarse_num_inference_steps + 1):
                 cur_fine_prediction[i] = prev_corrected_solution[i - 1].clone()
 
             get_tqdm_logger().write(
-                f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
+                f"SRDS Iteration {srds_iter + 1}/{coarse_num_inference_steps} "
+                "- Processing fine steps"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 timestep_start = coarse_timesteps[i - 1]
-                timestep_end = (
-                    coarse_timesteps[i] if i < coarse_num_inference_steps else -1
-                )
+                timestep_end = coarse_timesteps[i] if i < coarse_num_inference_steps else -1
                 cur_fine_prediction[i] = diffusion_step(
                     latents=cur_fine_prediction[i],
                     timestep=timestep_start,
@@ -220,7 +216,8 @@ class SRDS:
                 )
 
             get_tqdm_logger().write(
-                f"SRDS Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing coarse sweep"
+                f"SRDS Iteration {srds_iter + 1}/{coarse_num_inference_steps} "
+                "- Processing coarse sweep"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
                 cur_coarse_prediction[i] = diffusion_step(  # line 10 of Algorithm 1
@@ -242,23 +239,22 @@ class SRDS:
                     torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
                 )
             trajectory_errors.append(timestep_errors)
-            
+
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
             save_images_as_grid(images, f"{output_dir}/srds_iteration_{srds_iter}.png")
-            
+
             # Check convergence (line 13-14 of Algorithm 1)
             if prev_images is not None:
-
                 l1_distance = np.average(
                     np.abs(
-                        np.array(prev_images, dtype=np.float32)
-                        - np.array(images, dtype=np.float32)
+                        np.array(prev_images, dtype=np.float32) - np.array(images, dtype=np.float32)
                     )
                 )
                 status = "CONVERGED" if l1_distance < tolerance else "continuing"
                 get_tqdm_logger().write(
-                    f"SRDS Iteration {srds_iter+1}: L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
+                    f"SRDS Iteration {srds_iter + 1}: L1={l1_distance:.6f} "
+                    f"(tolerance={tolerance}) - {status}"
                 )
 
                 if l1_distance < tolerance:
@@ -279,10 +275,7 @@ class SRDS:
         )
 
         l1_distance = np.average(
-            np.abs(
-                np.array(gt_images, dtype=np.float32)
-                - np.array(images, dtype=np.float32)
-            )
+            np.abs(np.array(gt_images, dtype=np.float32) - np.array(images, dtype=np.float32))
         )
         get_logger().info(
             f"SRDS Complete: Final L1 distance from DDIM ground truth = {l1_distance:.6f}"
@@ -305,7 +298,8 @@ class SRDS:
         Compute ground truth DDIM trajectory using fine scheduler.
 
         Returns:
-            List[torch.Tensor]: Ground truth latents at each coarse timestep, with length = coarse_num_inference_steps + 1.
+            List[torch.Tensor]: Ground truth latents at each coarse timestep,
+                with length = coarse_num_inference_steps + 1.
         """
         gt_trajectory = []
         latents_gt = initial_latents.clone()
@@ -392,10 +386,8 @@ class SRDS:
             timesteps = list(range(coarse_num_inference_steps))
 
             # Plot each iteration as a line with different colors
-            for i, (iteration_name, row) in enumerate(df.iterrows()):
-                plt.plot(
-                    timesteps, row.values, marker="o", linewidth=2, label=iteration_name
-                )
+            for _i, (iteration_name, row) in enumerate(df.iterrows()):
+                plt.plot(timesteps, row.values, marker="o", linewidth=2, label=iteration_name)
 
             plt.xlabel("Timestep")
             plt.ylabel("Difference with Ground Truth")
@@ -404,7 +396,5 @@ class SRDS:
             plt.grid(True, alpha=0.3)
             plt.yscale("log")  # Using log scale since values vary greatly
             plt.tight_layout()
-            plt.savefig(
-                f"{output_dir}/trajectory_errors_plot.png", dpi=300, bbox_inches="tight"
-            )
+            plt.savefig(f"{output_dir}/trajectory_errors_plot.png", dpi=300, bbox_inches="tight")
             plt.show()
