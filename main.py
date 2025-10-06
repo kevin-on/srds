@@ -1,13 +1,12 @@
 import argparse
 import os
-import sys
 from datetime import datetime
 
 import torch
 
 from src.sparareal import StochasticParareal
 from src.srds import SRDS
-from utils.logger import setup_logging, log_info
+from utils.logger import log_info, setup_logging
 from utils.metrics import save_key_metrics_summary
 
 
@@ -23,11 +22,12 @@ def parse_prompts(prompts_input):
     """Parse prompts from text file (one prompt per line) or return single prompt"""
     if os.path.isfile(prompts_input):
         # Input is a file path
-        with open(prompts_input, "r") as f:
+        with open(prompts_input) as f:
             return [line.strip() for line in f if line.strip()]
     else:
         # Input is a direct prompt string
         return [prompts_input.strip()]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run SRDS diffusion algorithm")
@@ -86,7 +86,7 @@ def parse_args():
         "--sample_type",
         "-st",
         type=str,
-        default="ddim,eta=1.0", 
+        default="ddim,eta=1.0",
         help="Stochasticity",
     )
     # Optional arguments
@@ -118,10 +118,10 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    
+
     # Setup basic output directory
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     prompts = parse_prompts(args.prompts)
 
     set_seed(args.seed)
@@ -130,17 +130,20 @@ if __name__ == "__main__":
     # Create timestamped subdirectory with parameters
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.algorithm == "sparareal":
-        subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}_{args.sample_type}-{args.num_samples}"
+        subdir_name = (
+            f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}_"
+            f"{args.sample_type}-ns{args.num_samples}"
+        )
     else:
         subdir_name = f"{timestamp}_cs{args.coarse_steps}-fs{args.fine_steps}"
-    
+
     timestamped_output_dir = os.path.join(args.output_dir, subdir_name)
     os.makedirs(timestamped_output_dir, exist_ok=True)
-    
+
     # Update log file path to use timestamped directory
     log_file_path = os.path.join(timestamped_output_dir, args.log_file)
     logger = setup_logging(log_file_path)
-    
+
     # Log execution parameters
     log_info("SRDS/SParareal Execution Started")
     log_info(f"Algorithm: {args.algorithm}")
@@ -156,7 +159,7 @@ if __name__ == "__main__":
     if args.algorithm == "sparareal":
         log_info(f"Num samples: {args.num_samples}")
         log_info(f"Sample type: {args.sample_type}")
-    
+
     log_info(f"Loaded {len(prompts)} prompts")
 
     # Run selected algorithm
@@ -192,8 +195,8 @@ if __name__ == "__main__":
             generator=generator,
             output_dir=timestamped_output_dir,
         )
-    
+
     log_info("Execution completed successfully!")
-    
+
     # Save key metrics summary
     save_key_metrics_summary(timestamped_output_dir, args.algorithm)

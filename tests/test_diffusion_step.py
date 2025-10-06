@@ -5,7 +5,8 @@ Comprehensive test suite for diffusion_step function to ensure all functionality
 
 import torch
 from diffusers import DDIMScheduler, StableDiffusionPipeline
-from diffusion import diffusion_step
+
+from src.diffusion import diffusion_step
 
 
 def test_diffusion_step_comprehensive():
@@ -39,9 +40,7 @@ def test_diffusion_step_comprehensive():
     prompt_embeds = torch.cat([negative_prompt_embeds, prompt_embeds])
 
     # Prepare initial latents
-    latents = pipe.prepare_latents(
-        1, 4, 512, 512, prompt_embeds.dtype, device, generator
-    )
+    latents = pipe.prepare_latents(1, 4, 512, 512, prompt_embeds.dtype, device, generator)
 
     print(f"Scheduler timesteps: {scheduler.timesteps.tolist()}")
     print(f"Total timesteps: {len(scheduler.timesteps)}")
@@ -170,7 +169,7 @@ def test_diffusion_step_comprehensive():
     print("\n=== Test 8: Various Step Ranges ===")
 
     # Small range
-    latents_small = diffusion_step(
+    diffusion_step(
         latents.clone(),
         scheduler.timesteps[10],
         prompt_embeds,
@@ -198,9 +197,9 @@ def test_diffusion_step_comprehensive():
         print(f"✗ Single step with timestep_end differs (max diff: {diff_single:.2e})")
         return False
 
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("🎉 ALL TESTS PASSED! diffusion_step function works correctly")
-    print("="*50)
+    print("=" * 50)
     return True
 
 
@@ -235,7 +234,7 @@ def test_diffusion_step_edge_cases():
     # Edge case 1: Process only last step to end
     print("\n=== Edge Case 1: Last Step to End ===")
     try:
-        latents_last_to_end = diffusion_step(
+        diffusion_step(
             latents.clone(),
             scheduler.timesteps[-1],  # Last timestep
             prompt_embeds,
@@ -251,7 +250,7 @@ def test_diffusion_step_edge_cases():
     # Edge case 2: First step to second step
     print("\n=== Edge Case 2: First to Second Step ===")
     try:
-        latents_first_to_second = diffusion_step(
+        diffusion_step(
             latents.clone(),
             scheduler.timesteps[0],
             prompt_embeds,
@@ -276,9 +275,11 @@ def test_pipeline_compatibility():
     model_id = "stabilityai/stable-diffusion-2"
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    from diffusers import DDIMScheduler, StableDiffusionPipeline
-    import sys
     import os
+    import sys
+
+    from diffusers import DDIMScheduler, StableDiffusionPipeline
+
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from utils import decode_latents_to_pil
 
