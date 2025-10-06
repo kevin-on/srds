@@ -10,9 +10,6 @@ import numpy as np
 
 import torch
 
-# Add parent directory to path so we can import src and utils
-# sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from src.sparareal import StochasticParareal
 from src.srds import SRDS
 from utils.logger import setup_logging, log_info

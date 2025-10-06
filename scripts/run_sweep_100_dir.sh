@@ -4,7 +4,7 @@
 echo "Starting parameter sweep for SParareal..."
 
 # Basic sweep with different parameter combinations
-CUDA_VISIBLE_DEVICES=1 python scripts/sweep.py \
+python sweep.py \
     --prompt "a beautiful landscape with mountains and a lake" \
     --output-dir "./output/sweeps" \
     --algorithm sparareal \
