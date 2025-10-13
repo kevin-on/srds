@@ -208,8 +208,8 @@ class SPararealTTS(StochasticParareal):
             sample_config = parse_sample_type(sample_type)
             if sample_config["method"] == "ddim":
                 for i in range(1, coarse_num_inference_steps + 1):
-                    #FIXME
-                    if i < coarse_num_inference_steps:
+                    # FIXME
+                    if i == 1:
                         fine_trajectory_samples[i] = [
                             TrajectorySegment(x,x) 
                             for x in [prev_corrected_solution[i-1].clone()]
@@ -238,8 +238,7 @@ class SPararealTTS(StochasticParareal):
                             **sample_config["kwargs"]
                         )
                     ]
-                    
-
+                
             get_tqdm_logger().write(
                 f"SParareal Iteration {srds_iter+1}/{coarse_num_inference_steps} - Processing fine steps"
             )
@@ -261,56 +260,51 @@ class SPararealTTS(StochasticParareal):
                     )
 
             # Select optimal trajectory
-            for i in range(1, coarse_num_inference_steps + 1):
-                distances = [
-                    torch.norm(x.start - cur_fine_prediction[i - 1].end).item()
-                    for x in fine_trajectory_samples[i]
-                ]
-                min_idx = distances.index(min(distances))
-                cur_fine_prediction[i] = fine_trajectory_samples[i][min_idx]
-
-                get_tqdm_logger().write(
-                    f"  Timestep {i}: Selected candidate {min_idx} (is_original: {min_idx == 0})"
-                )
-                get_tqdm_logger().write(f"    Distances: {[f'{d:.6f}' for d in distances]}")
+            for i in range(coarse_num_inference_steps, 0, -1):
                 
-                # Visualize all samples at the last step
                 if i == coarse_num_inference_steps:
-                    get_tqdm_logger().write(
-                        f"  Visualizing all {len(fine_trajectory_samples[i])} samples at last step"
-                    )
                     sample_images = []
                     for sample_idx, sample in enumerate(fine_trajectory_samples[i]):
                         sample_image = decode_latents_to_pil(sample.end, pipe_coarse)
                         sample_images.extend(sample_image)
                     
-                    
-                    reward_scores = self.reward_scorer.score(sample_images, prompts[0])
-                    
-                    # Find best reward score
-                    best_reward_idx = reward_scores.index(max(reward_scores))
-                    
-                    # Save all samples as a grid with:
-                    # - RED border: selected by distance metric (min_idx)
-                    # - BLUE border: best reward score (best_reward_idx)
-                    # - Both borders (red outside, blue inside): if they are the same
-                    save_images_as_grid(
-                        sample_images, 
-                        f"{output_dir}/iteration_{srds_iter}_laststep_all_samples.png",
-                        selected_idx=min_idx,
-                        reward_idx=best_reward_idx
-                    )
-                    
+                    reward_scores = self.reward_scorer.score(sample_images, prompts[0])        
                     get_tqdm_logger().write(
                         f"  Reward scores: {[f'{score:.4f}' for score in reward_scores]}"
                     )
-                    get_tqdm_logger().write(
-                        f"  Selected sample (idx={min_idx}, RED border) has reward score: {reward_scores[min_idx]:.4f}"
+
+                    best_reward_idx = reward_scores.index(max(reward_scores))
+                    cur_fine_prediction[i] = fine_trajectory_samples[i][best_reward_idx]
+
+                    # Save all samples as a grid with:
+                    save_images_as_grid(
+                        sample_images, 
+                        f"{output_dir}/iteration_{srds_iter}_laststep_all_samples.png",
+                        reward_idx=best_reward_idx
                     )
                     get_tqdm_logger().write(
                         f"  Best reward score (idx={best_reward_idx}, BLUE border): {reward_scores[best_reward_idx]:.4f} "
-                        f"{'(SAME as selected)' if best_reward_idx == min_idx else '(DIFFERENT from selected)'}"
                     )
+                    # get_tqdm_logger().write(
+                    #     f"  Selected sample (idx={min_idx}, RED border) has reward score: {reward_scores[min_idx]:.4f}"
+                    # )
+                    
+                else:
+                    
+                    distances = [
+                        torch.norm(x.end - cur_fine_prediction[i+1].start).item()
+                        for x in fine_trajectory_samples[i]
+                    ]
+                    min_idx = distances.index(min(distances))
+                    cur_fine_prediction[i] = fine_trajectory_samples[i][min_idx]
+
+                    get_tqdm_logger().write(
+                        f"  Timestep {i}: Selected candidate {min_idx} (is_original: {min_idx == 0})"
+                    )
+                    get_tqdm_logger().write(f"    Distances: {[f'{d:.6f}' for d in distances]}")
+                    
+                    # Visualize all samples at the last step
+                
 
             # Compute coarse prediction from the start point of each optimal trajectory
             for i in range(1, coarse_num_inference_steps + 1):
