@@ -21,13 +21,12 @@ from utils.logger import get_logger, get_tqdm_logger
 class SPararealTTS(StochasticParareal):
             
     @torch.no_grad()
-    def set_reward_scorer(self, reward_model):
-        if reward_model == "pickscore":
-            scorer_name = "PickScore"
+    def set_reward_scorer(self, reward_scorer):
+        if reward_scorer == "pickscore":
             self.reward_scorer = PickScoreInferencer(device=self.device)
         else:
             raise "Not implemented scorer"
-        get_logger().info(f"Loaded reward scorer : {scorer_name}")
+        get_logger().info(f"Loaded reward scorer")
 
     @torch.no_grad()
     def __call__(
@@ -39,7 +38,7 @@ class SPararealTTS(StochasticParareal):
         tolerance: float = 0.1,
         guidance_scale: float = 7.5,
         sample_type: str = "ddim,eta=1.0", #"ddim,eta=" / "dir,shoot="
-        reward_model: str = None,
+        reward_scorer: str = None,
         height: int = 512,
         width: int = 512,
         generator: Optional[torch.Generator] = None,
@@ -91,7 +90,7 @@ class SPararealTTS(StochasticParareal):
         )
         pipe_coarse = pipe_coarse.to(self.device)
 
-        self.set_reward_scorer(reward_model)
+        self.set_reward_scorer(reward_scorer)
 
         # Encode prompt
         do_classifier_free_guidance = guidance_scale > 1.0

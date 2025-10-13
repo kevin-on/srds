@@ -4,8 +4,11 @@ from datetime import datetime
 
 import torch
 
-from src.sparareal import StochasticParareal
+
 from src.srds import SRDS
+from src.sparareal import StochasticParareal
+from src.spararealtts import SPararealTTS
+
 from utils.logger import log_info, setup_logging
 from utils.metrics import save_key_metrics_summary
 
@@ -71,7 +74,7 @@ def parse_args():
         "--algorithm",
         "-a",
         type=str,
-        choices=["srds", "sparareal"],
+        choices=["srds", "sparareal", "sparatts"],
         default="srds",
         help="Algorithm to use: srds or sparareal",
     )
@@ -87,7 +90,14 @@ def parse_args():
         "-st",
         type=str,
         default="ddim,eta=1.0",
-        help="Stochasticity",
+        help="Method of adding stochasticity",
+    )
+    parser.add_argument(
+        "--reward_scorer",
+        "-rs",
+        type=str,
+        default=None,
+        help="reward scorer for SPararealTTS algorithm"
     )
     # Optional arguments
     parser.add_argument(
@@ -160,6 +170,11 @@ if __name__ == "__main__":
         log_info(f"Num samples: {args.num_samples}")
         log_info(f"Sample type: {args.sample_type}")
 
+    if args.algorithm == "sparareal":
+        log_info(f"Num samples: {args.num_samples}")
+        log_info(f"Sample type: {args.sample_type}")
+        log_info(f"Reward scorer: {args.reward_scorer}")
+
     log_info(f"Loaded {len(prompts)} prompts")
 
     # Run selected algorithm
@@ -194,6 +209,24 @@ if __name__ == "__main__":
             width=args.width,
             generator=generator,
             output_dir=timestamped_output_dir,
+        )
+    elif args.algorithm == "sparatts":
+        log_info("Initializing SPararealTTS algorithm...")
+        algorithm = SPararealTTS(model_id=args.model)
+        log_info("Running SPararealTTS...")
+        algorithm(
+            prompts=prompts,
+            coarse_num_inference_steps=args.coarse_steps,
+            fine_num_inference_steps=args.fine_steps,
+            num_samples=args.num_samples,
+            tolerance=args.tolerance,
+            guidance_scale=args.guidance_scale,
+            sample_type=args.sample_type,
+            height=args.height,
+            width=args.width,
+            generator=generator,
+            output_dir=timestamped_output_dir,
+            reward_scorer=args.reward_scorer
         )
 
     log_info("Execution completed successfully!")
