@@ -171,6 +171,13 @@ if __name__ == "__main__":
     # Create timestamp for this run
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
+    # Create main subdirectory for this run
+    main_output_dir = create_main_subdir(args.output_dir, timestamp, args)
+    
+    log_file_path = os.path.join(main_output_dir, args.log_file)
+    logger = setup_logging(log_file_path)
+    log_info(f"Main output directory: {main_output_dir}")
+
     # Log execution parameters
     log_info("SRDS/SParareal Execution Started")
     log_info(f"Algorithm: {args.algorithm}")
@@ -192,10 +199,6 @@ if __name__ == "__main__":
         log_info(f"Reward scorer: {args.reward_scorer}")
 
     log_info(f"Loaded {len(prompts)} prompts")
-
-    # Create main subdirectory for this run
-    main_output_dir = create_main_subdir(args.output_dir, timestamp, args)
-    log_info(f"Main output directory: {main_output_dir}")
 
     # Run algorithm for each prompt separately
     all_images = []
