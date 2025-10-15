@@ -8,9 +8,9 @@ import torch
 from src.srds import SRDS
 from src.sparareal import StochasticParareal
 from src.spararealtts import SPararealTTS
+from src.adaptiveparareal import AdaptiveParareal
 
 from utils.logger import log_info, setup_logging
-
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
@@ -73,7 +73,7 @@ def parse_args():
         "--algorithm",
         "-a",
         type=str,
-        choices=["srds", "sparareal", "sparatts"],
+        choices=["srds", "sparareal", "sparatts", "adaptive"],
         default="srds",
         help="Algorithm to use: srds or sparareal",
     )
@@ -133,6 +133,8 @@ def create_main_subdir(base_output_dir, timestamp, args):
         subdir_name = f"{timestamp}_sparareal_cs{args.coarse_steps}-fs{args.fine_steps}_{args.sample_type}-ns{args.num_samples}"
     elif args.algorithm == "srds":
         subdir_name = f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
+    elif args.algorithm == "adaptive":
+        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs{args.fine_steps}"
     else:
         raise ValueError(f"Unknown algorithm: {args.algorithm}")
     
@@ -268,12 +270,11 @@ if __name__ == "__main__":
             )
         elif args.algorithm == "sparatts":
             if args.sample_type is None:
-                raise ValueError("sample_type must be specified when using spararealtts algorithm")
+                raise ValueError("sample_type must be specified when using SpararealTTS algorithm")
             
             if args.reward_scorer is None:
-                raise ValueError("reward_scorer must be specified when using spararealtts algorithm")
+                raise ValueError("reward_scorer must be specified when using SpararealTTS algorithm")
             
-
             log_info("Initializing SPararealTTS algorithm...")
             algorithm = SPararealTTS(model_id=args.model)
             log_info("Running SPararealTTS...")
@@ -291,6 +292,22 @@ if __name__ == "__main__":
                 output_dir=prompt_output_dir,
                 reward_scorer=args.reward_scorer
             )
+        elif args.algorithm == "adaptive":
+            log_info("Initializing Adaptive Parareal algorithm...")
+            algorithm = AdaptiveParareal(model_id=args.model)
+            log_info("Running Adaptive Parareal...")
+            images = algorithm(
+                prompts=[prompt],  # Single prompt
+                coarse_num_inference_steps=args.coarse_steps,
+                fine_num_inference_steps=args.fine_steps,
+                tolerance=args.tolerance,
+                guidance_scale=args.guidance_scale,
+                height=args.height,
+                width=args.width,
+                generator=generator,
+                output_dir=prompt_output_dir,
+            )
+            
         else:
             raise ValueError(f"Unknown algorithm: {args.algorithm}")
 
