@@ -77,6 +77,17 @@ def parse_args():
         default="srds",
         help="Algorithm to use: srds or sparareal",
     )
+    
+    # Adaptive Parareal
+    parser.add_argument(
+        "--adaptive",
+        "-ad",
+        type=int,
+        default=0,
+        help="Adaptive schedule for adaptive Parareal"
+    )
+
+    # Stochastic Parareal
     parser.add_argument(
         "--num-samples",
         "-ns",
@@ -98,30 +109,20 @@ def parse_args():
         default=None,
         help="reward scorer for SPararealTTS algorithm"
     )
+
     # Optional arguments
-    parser.add_argument(
-        "--guidance-scale",
-        "-gs",
-        type=float,
-        default=7.5,
-        help="Guidance scale for classifier-free guidance",
-    )
-    parser.add_argument("--height", type=int, default=512, help="Image height")
-    parser.add_argument("--width", type=int, default=512, help="Image width")
-    parser.add_argument("--seed", "-s", type=int, default=42, help="Random seed")
     parser.add_argument(
         "--model",
         type=str,
         default="stabilityai/stable-diffusion-2",
         help="Hugging Face model ID",
     )
-    parser.add_argument(
-        "--log-file",
-        type=str,
-        default="log.txt",
-        help="Log file path (default: log.txt)",
-    )
-
+    parser.add_argument("--guidance-scale", type=float, default=7.5, help="classifier-free guidance")
+    parser.add_argument("--height", type=int, default=512, help="Image height")
+    parser.add_argument("--width", type=int, default=512, help="Image width")
+    parser.add_argument("--seed", "-s", type=int, default=42, help="Random seed")
+    parser.add_argument("--log-file", type=str, default="log.txt",help="Log file path")
+    
     return parser.parse_args()
 
 
@@ -134,7 +135,7 @@ def create_main_subdir(base_output_dir, timestamp, args):
     elif args.algorithm == "srds":
         subdir_name = f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
     elif args.algorithm == "adaptive":
-        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs{args.fine_steps}"
+        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs{args.fine_steps}-ad{args.adaptive}"
     else:
         raise ValueError(f"Unknown algorithm: {args.algorithm}")
     
@@ -301,6 +302,7 @@ if __name__ == "__main__":
                 coarse_num_inference_steps=args.coarse_steps,
                 fine_num_inference_steps=args.fine_steps,
                 tolerance=args.tolerance,
+                adaptive=args.adaptive,
                 guidance_scale=args.guidance_scale,
                 height=args.height,
                 width=args.width,

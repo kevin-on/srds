@@ -20,7 +20,6 @@ Future Enhancements:
 - Implement pipelining
 """
 
-
 class AdaptiveParareal:
     def __init__(
         self,
@@ -51,6 +50,7 @@ class AdaptiveParareal:
         coarse_num_inference_steps: int,
         fine_num_inference_steps: int,
         tolerance: float,
+        adaptive: int,
         guidance_scale: float = 7.5,
         height: int = 512,
         width: int = 512,
@@ -212,7 +212,7 @@ class AdaptiveParareal:
                 timestep_end = coarse_timesteps[i] if i < coarse_num_inference_steps else -1
                 
                 #FIXME
-                if i < coarse_num_inference_steps //2:
+                if i < 1 + adaptive:
                     cur_scheduler_fine = scheduler_fine_sub
                 else:
                     cur_scheduler_fine = scheduler_fine
