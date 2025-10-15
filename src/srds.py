@@ -184,7 +184,10 @@ class SRDS:
             output_dir,
         )
 
-        trajectory_errors: List[
+        gt_trajectory_errors: List[
+            List[float]
+        ] = []  # [iteration][timestep] error matrix for ground truth comparison
+        trajectory_convergences: List[
             List[float]
         ] = []  # [iteration][timestep] error matrix for convergence analysis
         prev_images: Optional[List[Image.Image]] = (
@@ -233,12 +236,19 @@ class SRDS:
                     cur_coarse_prediction[i] - prev_coarse_prediction[i]
                 )  # line 11 of Algorithm 1
 
-            timestep_errors = []
+            errors = []
             for i in range(1, coarse_num_inference_steps + 1):
-                timestep_errors.append(
+                errors.append(
                     torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
                 )
-            trajectory_errors.append(timestep_errors)
+            gt_trajectory_errors.append(errors)
+
+            convergences = []
+            for i in range(1, coarse_num_inference_steps + 1):
+                convergences.append(
+                    torch.norm(cur_corrected_solution[i] - prev_corrected_solution[i]).item()
+                )
+            trajectory_convergences.append(convergences)
 
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
@@ -271,7 +281,7 @@ class SRDS:
         gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
-            images, gt_images, trajectory_errors, coarse_num_inference_steps, output_dir
+            images, gt_images, gt_trajectory_errors, trajectory_convergences, coarse_num_inference_steps, output_dir
         )
 
         l1_distance = np.average(
@@ -361,7 +371,8 @@ class SRDS:
         self,
         images: List[Image.Image],
         gt_images: List[Image.Image],
-        trajectory_errors: List[List[float]],
+        gt_trajectory_errors: List[List[float]],
+        trajectory_convergences: List[List[float]],
         coarse_num_inference_steps: int,
         output_dir: str,
     ) -> None:
@@ -373,13 +384,13 @@ class SRDS:
         save_images_as_grid(gt_images, f"{output_dir}/srds_ddim_gt.png")
 
         # Save trajectory errors to CSV
-        if trajectory_errors:
+        if gt_trajectory_errors:
             df = pd.DataFrame(
-                np.array(trajectory_errors),
-                index=[f"Iteration_{i}" for i in range(len(trajectory_errors))],
+                np.array(gt_trajectory_errors),
+                index=[f"Iteration_{i}" for i in range(len(gt_trajectory_errors))],
                 columns=[f"Timestep_{i}" for i in range(coarse_num_inference_steps)],
             )
-            df.to_csv(f"{output_dir}/trajectory_errors_table.csv", float_format="%.6f")
+            df.to_csv(f"{output_dir}/_gt_trajectory_errors_table.csv", float_format="%.4f")
 
             # Plot trajectory errors
             plt.figure(figsize=(10, 6))
@@ -391,10 +402,37 @@ class SRDS:
 
             plt.xlabel("Timestep")
             plt.ylabel("Difference with Ground Truth")
-            plt.title("SRDS Convergence: Difference with Ground Truth Over Timesteps")
+            plt.title("SRDS Convergence: Difference with Ground Truth over Timesteps")
             plt.legend()
             plt.grid(True, alpha=0.3)
             plt.yscale("log")  # Using log scale since values vary greatly
             plt.tight_layout()
-            plt.savefig(f"{output_dir}/trajectory_errors_plot.png", dpi=300, bbox_inches="tight")
+            plt.savefig(f"{output_dir}/_gt_trajectory_errors_plot.png", dpi=300, bbox_inches="tight")
+            plt.show()
+
+        # Save trajectory convergences to CSV
+        if trajectory_convergences:
+            df = pd.DataFrame(
+                np.array(trajectory_convergences),
+                index=[f"Iteration_{i}" for i in range(len(trajectory_convergences))],
+                columns=[f"Timestep_{i}" for i in range(coarse_num_inference_steps)],
+            )
+            df.to_csv(f"{output_dir}/_trajectory_convergences_table.csv", float_format="%.4f")
+
+            # Plot trajectory convergences
+            plt.figure(figsize=(10, 6))
+            timesteps = list(range(coarse_num_inference_steps))
+
+            # Plot each iteration as a line with different colors
+            for _i, (iteration_name, row) in enumerate(df.iterrows()):
+                plt.plot(timesteps, row.values, marker="o", linewidth=2, label=iteration_name)
+
+            plt.xlabel("Timestep")
+            plt.ylabel("Convergence")
+            plt.title("SRDS Convergence: Difference with Previous Iteration over Timesteps")
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            plt.yscale("log")  # Using log scale since values vary greatly
+            plt.tight_layout()
+            plt.savefig(f"{output_dir}/_trajectory_convergences_plot.png", dpi=300, bbox_inches="tight")
             plt.show()

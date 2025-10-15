@@ -193,7 +193,10 @@ class SPararealTTS(StochasticParareal):
             output_dir,
         )
 
-        trajectory_errors: List[List[float]] = (
+        gt_trajectory_errors: List[List[float]] = (
+            []
+        )  # [iteration][timestep] error matrix for ground truth comparison
+        trajectory_convergences: List[List[float]] = (
             []
         )  # [iteration][timestep] error matrix for convergence analysis
         prev_images: Optional[List[Image.Image]] = (
@@ -335,12 +338,19 @@ class SPararealTTS(StochasticParareal):
                     cur_coarse_prediction[i] - coarse_prediction_from_optimal[i]
                 )  # line 11 of Algorithm 1
 
-            timestep_errors = []
+            errors = []
             for i in range(1, coarse_num_inference_steps + 1):
-                timestep_errors.append(
+                errors.append(
                     torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
                 )
-            trajectory_errors.append(timestep_errors)
+            gt_trajectory_errors.append(errors)
+
+            convergences = []
+            for i in range(1, coarse_num_inference_steps + 1):
+                convergences.append(
+                    torch.norm(cur_corrected_solution[i] - prev_corrected_solution[i]).item()
+                )
+            trajectory_convergences.append(convergences)
 
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
@@ -374,7 +384,7 @@ class SPararealTTS(StochasticParareal):
         gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
-            images, gt_images, trajectory_errors, coarse_num_inference_steps, output_dir
+            images, gt_images, gt_trajectory_errors, trajectory_convergences, coarse_num_inference_steps, output_dir
         )
 
         l1_distance = np.average(
