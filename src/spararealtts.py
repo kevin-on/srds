@@ -22,11 +22,11 @@ class SPararealTTS(StochasticParareal):
             
     @torch.no_grad()
     def set_reward_scorer(self, reward_scorer):
-        if reward_scorer == "pickscore":
+        if reward_scorer == "pickscore" or reward_scorer is None:
             self.reward_scorer = PickScoreInferencer(device=self.device)
         else:
-            raise "Not implemented scorer"
-        get_logger().info(f"Loaded reward scorer")
+            raise ValueError(f"Not implemented scorer: {reward_scorer}")
+        get_logger().info(f"Loaded reward scorer: {reward_scorer or 'pickscore (default)'}")
 
     @torch.no_grad()
     def __call__(

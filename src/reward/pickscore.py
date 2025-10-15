@@ -106,11 +106,11 @@ if __name__ == "__main__":
     
     # Load example images
     pil_images = [
-        Image.open("/home2/junoh/2025_para_scaling/srds/output/sweeps/sweep_20251005_153510_sparareal/exp_002_cs10-fs100_ns5_ddim_eta_0.01_tol0.1/srds_iteration_0.png"),
-        Image.open("/home2/junoh/2025_para_scaling/srds/output/sweeps/sweep_20251005_153510_sparareal/exp_002_cs10-fs100_ns5_ddim_eta_0.01_tol0.1/srds_iteration_8.png"),
-        Image.open("/home2/junoh/2025_para_scaling/srds/output/sweeps/sweep_20251005_153510_sparareal/exp_002_cs10-fs100_ns5_ddim_eta_0.01_tol0.1/srds_iteration_9.png")
+        Image.open("/home2/junoh/2025_para_scaling/srds/output/sparatts_test/20251013_080911_cs10-fs100/srds_final.png"),
+        # Image.open("/home2/junoh/2025_para_scaling/srds/output/sparatts_test/20251013_074203_cs10-fs100/srds_final.png"),
+        # Image.open("/home2/junoh/2025_para_scaling/srds/output/sparatts_test/20251013_074003_cs10-fs100/srds_iteration_9.png")
     ]
-    prompt = "a landscape"
+    prompt = "a photo of a dog and a cat"
     
     # Calculate scores
     scores = inferencer.score(pil_images, prompt)
