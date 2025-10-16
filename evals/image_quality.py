@@ -48,18 +48,18 @@ def extract_prompt_from_dir(prompt_dir):
         return match.group(1).replace('_', ' ')
     return dir_name
 
-def get_iteration_images(prompt_dir):
-    """Get images from each iteration in a prompt directory"""
-    iteration_images = {}
+def get_all_images(prompt_dir):
+    """Get all relevant images from a prompt directory"""
+    images = {}
     
-    # Look for iteration-specific image files with different naming patterns
-    image_patterns = [
+    # Look for iteration-specific image files
+    iteration_patterns = [
         "srds_iteration_*.png",  # srds_iteration_0.png, srds_iteration_1.png, etc.
         "iteration_*.png",       # iteration_5.png
         "sample_iteration_*.png" # sample_iteration_5.png
     ]
     
-    for pattern in image_patterns:
+    for pattern in iteration_patterns:
         image_files = glob.glob(os.path.join(prompt_dir, pattern))
         
         for img_file in image_files:
@@ -69,36 +69,41 @@ def get_iteration_images(prompt_dir):
                 iteration_num = int(match.group(1))
                 try:
                     img = Image.open(img_file)
-                    iteration_images[iteration_num] = img
+                    images[iteration_num] = img
                     print(f"    Found iteration {iteration_num}: {os.path.basename(img_file)}")
                 except Exception as e:
                     print(f"Error loading image {img_file}: {e}")
     
-    # Also check for other final images
-    final_image_files = [
+    # Look for baseline and final images
+    special_image_files = [
         "srds_final.png",
         "final_image.png",
         "sample_final.png",
-        "srds_initialized.png"
+        "srds_initialized.png",
+        "srds_ddim_gt.png",
+        "ddim_gt.png",
+        "gt_image.png"
     ]
     
-    for filename in final_image_files:
+    for filename in special_image_files:
         img_path = os.path.join(prompt_dir, filename)
         if os.path.exists(img_path):
             try:
                 img = Image.open(img_path)
                 # Use special indices for non-iteration images
-                if "initialized" in filename:
-                    iteration_images[-1] = img  # Initial image
+                if "ddim_gt" in filename or "gt_image" in filename:
+                    images[999] = img  # DDIM GT image
+                    print(f"    Found DDIM GT: {filename}")
+                elif "initialized" in filename:
+                    images[-1] = img  # Initialized image
+                    print(f"    Found initialized: {filename}")
                 else:
-                    # Don't add final image as separate iteration, it's usually same as last iteration
+                    # Final image (usually same as last iteration, so skip to avoid duplication)
                     pass
-                print(f"    Found special image: {filename}")
-                break
             except Exception as e:
                 print(f"Error loading special image {img_path}: {e}")
     
-    return iteration_images
+    return images
 
 def calculate_metric_for_iterations(iteration_images, prompt_text, metric, inferencer):
     """Calculate specified metric for each iteration"""
@@ -144,6 +149,7 @@ def analyze_experiment_metric(exp_dir, metric, inferencer):
     
     all_iteration_scores = {}
     all_final_scores = []
+    baseline_scores = {'ddim_gt': [], 'initialized': []}  # Store individual baseline scores
     
     print(f"\nAnalyzing experiment: {exp_name}")
     print(f"Found {len(prompt_dirs)} prompts")
@@ -155,18 +161,18 @@ def analyze_experiment_metric(exp_dir, metric, inferencer):
         print(f"\nProcessing {prompt_name}")
         print(f"Prompt: {prompt_text}")
         
-        # Get images for each iteration
-        iteration_images = get_iteration_images(prompt_dir)
+        # Get all images (iterations + baselines)
+        all_images = get_all_images(prompt_dir)
         
-        if not iteration_images:
-            print(f"  No iteration images found in {prompt_dir}")
+        if not all_images:
+            print(f"  No images found in {prompt_dir}")
             continue
         
-        print(f"  Found {len(iteration_images)} iteration images")
+        print(f"  Found {len(all_images)} images")
         
-        # Calculate metric for each iteration
+        # Calculate metric for each image
         scores = calculate_metric_for_iterations(
-            iteration_images, prompt_text, metric, inferencer
+            all_images, prompt_text, metric, inferencer
         )
         
         # Store scores by iteration
@@ -174,12 +180,18 @@ def analyze_experiment_metric(exp_dir, metric, inferencer):
             if iter_num not in all_iteration_scores:
                 all_iteration_scores[iter_num] = []
             all_iteration_scores[iter_num].append(score)
+            
+            # Store baseline scores individually
+            if iter_num == 999:  # DDIM GT
+                baseline_scores['ddim_gt'].append(score)
+            elif iter_num == -1:  # Initialized
+                baseline_scores['initialized'].append(score)
         
-        # Store final score (highest iteration number, excluding special indices)
+        # Store final score (highest iteration number, excluding special indices and DDIM GT)
         final_score = None
         if scores:
-            # Get the highest iteration number (excluding special indices like -1)
-            regular_iters = [k for k in scores.keys() if k >= 0]
+            # Get the highest iteration number (excluding special indices like -1, 999)
+            regular_iters = [k for k in scores.keys() if k >= 0 and k < 999]
             if regular_iters:
                 max_iter = max(regular_iters)
                 final_score = scores[max_iter]
@@ -197,9 +209,9 @@ def analyze_experiment_metric(exp_dir, metric, inferencer):
                 'count': len(scores)
             }
         
-        return exp_name, iteration_stats, all_final_scores
+        return exp_name, iteration_stats, all_final_scores, baseline_scores
     else:
-        return exp_name, None, []
+        return exp_name, None, [], baseline_scores
 
 def main():
     parser = argparse.ArgumentParser(description='Analyze iteration convergence from experiments')
@@ -240,10 +252,15 @@ def main():
     print(f"Found {len(exp_dirs)} experiments in {base_dir}")
     
     results = []
+    all_baseline_scores = {'ddim_gt': [], 'initialized': []}
+    
     for exp_dir in exp_dirs:
-        exp_name, iteration_stats, final_scores = analyze_experiment_metric(exp_dir, args.metric, inferencer)
+        exp_name, iteration_stats, final_scores, baseline_scores = analyze_experiment_metric(exp_dir, args.metric, inferencer)
         if iteration_stats is not None:
             results.append((exp_name, iteration_stats, final_scores))
+            # Collect baseline scores from first experiment only (they should be same across experiments)
+            if not all_baseline_scores['ddim_gt']:  # Only collect from first experiment
+                all_baseline_scores = baseline_scores
     
     # Create plots
     if results:
@@ -254,9 +271,10 @@ def main():
         
         # Plot 1: Metric across iterations (left)
         ax1 = axes[0]
+        
         for i, (exp_name, iteration_stats, final_scores) in enumerate(results):
-            # Filter out special iterations (like -1)
-            regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0]
+            # Filter out special iterations (like -1, 999)
+            regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0 and k < 999]
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]
             
             ax1.plot(regular_iterations, means, 'o-', 
@@ -271,7 +289,7 @@ def main():
         # Adjust y-axis scale to better separate the curves
         all_means = []
         for _, iteration_stats, _ in results:
-            regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0]
+            regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0 and k < 999]
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]
             all_means.extend(means)
         
@@ -280,21 +298,45 @@ def main():
             y_max = max(all_means) * 1.002  # Slightly above maximum
             ax1.set_ylim(y_min, y_max)
         
-        # Plot 2: Final scores box plot (right)
+        # Plot 2: All scores box plot (right) - includes baselines
         ax2 = axes[1]
+        
+        # Collect baseline scores (DDIM GT and Initialized) - individual scores per prompt
+        baseline_data = []
+        baseline_labels = []
+        baseline_colors = []
+        
+        # Add DDIM GT if available (individual scores per prompt)
+        if all_baseline_scores['ddim_gt']:
+            baseline_data.append(all_baseline_scores['ddim_gt'])
+            baseline_labels.append('DDIM GT')
+            baseline_colors.append('red')
+        
+        # Add Initialized if available (individual scores per prompt)
+        if all_baseline_scores['initialized']:
+            baseline_data.append(all_baseline_scores['initialized'])
+            baseline_labels.append('Initialized')
+            baseline_colors.append('blue')
+        
+        # Add experiment final scores
         exp_names = [result[0] for result in results]
         final_score_data = [result[2] for result in results]
         
-        bp = ax2.boxplot(final_score_data, labels=exp_names, patch_artist=True)
+        # Combine baseline and experiment data
+        all_data = baseline_data + final_score_data
+        all_labels = baseline_labels + exp_names
+        all_colors = baseline_colors + list(colors)
+        
+        bp = ax2.boxplot(all_data, labels=all_labels, patch_artist=True)
         
         # Color the boxes
-        for patch, color in zip(bp['boxes'], colors):
+        for patch, color in zip(bp['boxes'], all_colors):
             patch.set_facecolor(color)
             patch.set_alpha(0.7)
         
-        ax2.set_xlabel('Experiment')
-        ax2.set_ylabel(f'Final {args.metric.upper()}')
-        ax2.set_title(f'Final {args.metric.upper()} Distribution by Experiment')
+        ax2.set_xlabel('Method')
+        ax2.set_ylabel(f'{args.metric.upper()}')
+        ax2.set_title(f'{args.metric.upper()} Distribution by Method')
         ax2.tick_params(axis='x', rotation=45)
         ax2.grid(True, alpha=0.3)
         
@@ -314,10 +356,19 @@ def main():
         
         for exp_name, iteration_stats, final_scores in results:
             print(f"\n{exp_name}:")
-            # Filter out special iterations
-            regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0]
+            # Filter out special iterations (keep only regular iterations 0-9)
+            regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0 and k < 999]
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]
             stds = [iteration_stats[iter_num]['std'] for iter_num in regular_iterations]
+            
+            # Print baseline scores if available
+            if -1 in iteration_stats:  # Initialized
+                init_score = iteration_stats[-1]['mean']
+                print(f"  Initialized {args.metric.upper()}: {init_score:.4f} ± {iteration_stats[-1]['std']:.4f}")
+            
+            if 999 in iteration_stats:  # DDIM GT
+                gt_score = iteration_stats[999]['mean']
+                print(f"  DDIM GT {args.metric.upper()}: {gt_score:.4f} ± {iteration_stats[999]['std']:.4f}")
             
             if len(means) >= 2:
                 initial_score = means[0]

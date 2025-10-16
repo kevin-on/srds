@@ -28,29 +28,39 @@ def extract_prompt_from_dir(prompt_dir):
         return match.group(1).replace('_', ' ')
     return dir_name
 
-def find_final_images(prompt_dir):
-    """Find final image files in a prompt directory"""
-    final_images = []
+def find_all_images(prompt_dir):
+    """Find all relevant image files in a prompt directory"""
+    images = {}
     
-    # Look for various final image patterns
-    final_image_patterns = [
+    # Look for various image patterns
+    image_patterns = [
         "srds_final.png",
         "final_image.png", 
         "sample_final.png",
-        "srds_initialized.png"
+        "srds_initialized.png",
+        "srds_ddim_gt.png",
+        "ddim_gt.png",
+        "gt_image.png"
     ]
     
-    for pattern in final_image_patterns:
+    for pattern in image_patterns:
         img_path = os.path.join(prompt_dir, pattern)
         if os.path.exists(img_path):
-            final_images.append({
+            # Normalize the key name
+            if "ddim_gt" in pattern or "gt_image" in pattern:
+                key = "ddim_gt"
+            elif "initialized" in pattern:
+                key = "initialized"
+            else:
+                key = "final"
+            
+            images[key] = {
                 'filename': pattern,
                 'path': img_path,
                 'relative_path': os.path.relpath(img_path, prompt_dir)
-            })
-            break  # Take the first found image
+            }
     
-    return final_images
+    return images
 
 def generate_html_gallery(base_dir):
     """Generate HTML gallery for all experiments"""
@@ -84,6 +94,8 @@ def generate_html_gallery(base_dir):
     
     # Collect all prompts and their methods
     prompt_data = {}
+    ddim_gt_images = {}  # Cache for ddim_gt (same across all experiments)
+    initialized_images = {}  # Cache for initialized (same across all experiments)
     
     for exp_dir in exp_dirs:
         exp_name = extract_experiment_name(exp_dir)
@@ -97,11 +109,30 @@ def generate_html_gallery(base_dir):
             if prompt_text not in prompt_data:
                 prompt_data[prompt_text] = {}
             
-            final_images = find_final_images(prompt_dir)
-            if final_images:
-                img = final_images[0]
+            images = find_all_images(prompt_dir)
+            
+            # Store final image for this experiment
+            if 'final' in images:
+                img = images['final']
                 relative_img_path = os.path.relpath(img['path'], base_dir)
                 prompt_data[prompt_text][exp_name] = {
+                    'image_path': relative_img_path,
+                    'filename': img['filename']
+                }
+            
+            # Cache ddim_gt and initialized images (same across all experiments)
+            if 'ddim_gt' in images and prompt_text not in ddim_gt_images:
+                img = images['ddim_gt']
+                relative_img_path = os.path.relpath(img['path'], base_dir)
+                ddim_gt_images[prompt_text] = {
+                    'image_path': relative_img_path,
+                    'filename': img['filename']
+                }
+            
+            if 'initialized' in images and prompt_text not in initialized_images:
+                img = images['initialized']
+                relative_img_path = os.path.relpath(img['path'], base_dir)
+                initialized_images[prompt_text] = {
                     'image_path': relative_img_path,
                     'filename': img['filename']
                 }
@@ -114,6 +145,26 @@ def generate_html_gallery(base_dir):
         <div class="methods-grid">
 """
         
+        # Add baseline images first (ddim_gt, initialized)
+        if prompt_text in ddim_gt_images:
+            data = ddim_gt_images[prompt_text]
+            html_content += f"""
+            <div class="method">
+                <div class="method-name">DDIM GT</div>
+                <img src="{data['image_path']}" alt="DDIM GT" class="method-image">
+            </div>
+"""
+        
+        if prompt_text in initialized_images:
+            data = initialized_images[prompt_text]
+            html_content += f"""
+            <div class="method">
+                <div class="method-name">Initialized</div>
+                <img src="{data['image_path']}" alt="Initialized" class="method-image">
+            </div>
+"""
+        
+        # Add experiment methods
         for method_name, data in methods.items():
             html_content += f"""
             <div class="method">
