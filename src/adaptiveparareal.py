@@ -200,14 +200,14 @@ class AdaptiveParareal:
             None  # Previous final image for L1 convergence check
         )
         for srds_iter in tqdm(
-            range(coarse_num_inference_steps), desc="SRDS Iterations"
+            range(1000), desc="SRDS Iterations"
         ):  # line 6 of Algorithm 1
             # cur_fine_prediction starts from prev_corrected_solution
             for i in range(1, coarse_num_inference_steps + 1):
                 cur_fine_prediction[i] = prev_corrected_solution[i - 1].clone()
 
             get_tqdm_logger().write(
-                f"SRDS Iteration {srds_iter + 1}/{coarse_num_inference_steps} "
+                f"SRDS Iteration {srds_iter + 1} "
                 "- Processing fine steps"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
@@ -232,7 +232,7 @@ class AdaptiveParareal:
                 )
 
             get_tqdm_logger().write(
-                f"SRDS Iteration {srds_iter + 1}/{coarse_num_inference_steps} "
+                f"SRDS Iteration {srds_iter + 1} "
                 "- Processing coarse sweep"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
