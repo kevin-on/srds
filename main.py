@@ -86,6 +86,13 @@ def parse_args():
         default=0,
         help="Adaptive schedule for adaptive Parareal"
     )
+    parser.add_argument(
+        "--fine-steps2",
+        "-fs2",
+        type=int,
+        default=None,
+        help="Number of fine inference steps",
+    )
 
     # Stochastic Parareal
     parser.add_argument(
@@ -135,7 +142,7 @@ def create_main_subdir(base_output_dir, timestamp, args):
     elif args.algorithm == "srds":
         subdir_name = f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
     elif args.algorithm == "adaptive":
-        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs{args.fine_steps}-ad{args.adaptive}"
+        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs2{args.fine_steps2}-fs{args.fine_steps}-ad{args.adaptive}"
     else:
         raise ValueError(f"Unknown algorithm: {args.algorithm}")
     
@@ -297,6 +304,8 @@ if __name__ == "__main__":
                 reward_scorer=args.reward_scorer
             )
         elif args.algorithm == "adaptive":
+            if args.fine_steps2 is None:
+                raise ValueError("fine_steps2 must be specified when using AdaptivePrareal algorithm")
             log_info("Initializing Adaptive Parareal algorithm...")
             algorithm = AdaptiveParareal(model_id=args.model)
             log_info("Running Adaptive Parareal...")
@@ -304,6 +313,7 @@ if __name__ == "__main__":
                 prompts=[prompt],  # Single prompt
                 coarse_num_inference_steps=args.coarse_steps,
                 fine_num_inference_steps=args.fine_steps,
+                fine_num_inference_steps_sub=args.fine_steps2,
                 tolerance=args.tolerance,
                 adaptive=args.adaptive,
                 guidance_scale=args.guidance_scale,

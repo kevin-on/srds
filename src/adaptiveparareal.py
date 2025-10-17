@@ -49,6 +49,7 @@ class AdaptiveParareal:
         prompts: List[str],
         coarse_num_inference_steps: int,
         fine_num_inference_steps: int,
+        fine_num_inference_steps_sub: int, 
         tolerance: float,
         adaptive: int,
         guidance_scale: float = 7.5,
@@ -71,13 +72,12 @@ class AdaptiveParareal:
         scheduler_fine = DDIMScheduler.from_pretrained(
             self.model_id, subfolder="scheduler", timestep_spacing="trailing"
         )
-        scheduler_coarse.set_timesteps(coarse_num_inference_steps)
-        scheduler_fine.set_timesteps(fine_num_inference_steps)
-
         scheduler_fine_sub = DDIMScheduler.from_pretrained(
             self.model_id, subfolder="scheduler", timestep_spacing="trailing"
         )
-        scheduler_fine_sub.set_timesteps(fine_num_inference_steps//2)
+        scheduler_coarse.set_timesteps(coarse_num_inference_steps)
+        scheduler_fine.set_timesteps(fine_num_inference_steps)
+        scheduler_fine_sub.set_timesteps(fine_num_inference_steps_sub)
         
         coarse_timesteps = scheduler_coarse.timesteps
         fine_timesteps = scheduler_fine.timesteps
@@ -91,7 +91,7 @@ class AdaptiveParareal:
             f"  Coarse steps: {len(coarse_timesteps)} | timesteps: {coarse_timesteps}"
         )
         get_logger().info(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
-
+        get_logger().info(f"  Fine steps2: {len(fine_timesteps_sub)} | timesteps: {fine_timesteps_sub}")
         # Create a copy of the pipeline with the coarse scheduler
         pipe_coarse = StableDiffusionPipeline(
             vae=self.pipe.vae,

@@ -33,10 +33,25 @@ except ImportError:
 def extract_experiment_name(dir_path):
     """Extract experiment configuration from directory name"""
     dir_name = os.path.basename(dir_path)
+    
     # Extract adaptive parameter (ad0, ad2, ad4, etc.)
     match = re.search(r'ad(\d+)', dir_name)
     if match:
         return f"ad{match.group(1)}"
+    
+    # Extract sequential steps (sequential_ddim50, sequential_ddim100, etc.)
+    match = re.search(r'sequential_ddim(\d+)', dir_name)
+    if match:
+        return f"sequential_{match.group(1)}"
+    
+    # Extract other algorithm types
+    if 'srds' in dir_name:
+        return 'srds'
+    elif 'sparareal' in dir_name:
+        return 'sparareal'
+    elif 'sparatts' in dir_name:
+        return 'sparatts'
+    
     return "unknown"
 
 def extract_prompt_from_dir(prompt_dir):
@@ -73,6 +88,25 @@ def get_all_images(prompt_dir):
                     print(f"    Found iteration {iteration_num}: {os.path.basename(img_file)}")
                 except Exception as e:
                     print(f"Error loading image {img_file}: {e}")
+    
+    # Look for sequential images
+    sequential_patterns = [
+        "sequential_image_*.png",  # sequential_image_0_0.png
+        "sequential_grid.png"      # sequential_grid.png
+    ]
+    
+    for pattern in sequential_patterns:
+        image_files = glob.glob(os.path.join(prompt_dir, pattern))
+        
+        for img_file in image_files:
+            try:
+                img = Image.open(img_file)
+                # For sequential images, use index 0 (single image)
+                images[0] = img
+                print(f"    Found sequential image: {os.path.basename(img_file)}")
+                break  # Only take the first sequential image found
+            except Exception as e:
+                print(f"Error loading sequential image {img_file}: {e}")
     
     # Look for baseline and final images
     special_image_files = [
@@ -195,6 +229,9 @@ def analyze_experiment_metric(exp_dir, metric, inferencer):
             if regular_iters:
                 max_iter = max(regular_iters)
                 final_score = scores[max_iter]
+            # For sequential (only has index 0), use that score
+            elif 0 in scores:
+                final_score = scores[0]
         
         if final_score is not None:
             all_final_scores.append(final_score)
@@ -277,8 +314,13 @@ def main():
             regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0 and k < 999]
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]
             
-            ax1.plot(regular_iterations, means, 'o-', 
-                    label=f'{exp_name}', color=colors[i], linewidth=2.5, markersize=6)
+            # For sequential experiments, plot as a single point
+            if 'sequential' in exp_name and len(regular_iterations) == 1:
+                ax1.plot(regular_iterations, means, 'o', 
+                        label=f'{exp_name}', color=colors[i], markersize=8)
+            else:
+                ax1.plot(regular_iterations, means, 'o-', 
+                        label=f'{exp_name}', color=colors[i], linewidth=2.5, markersize=6)
         
         ax1.set_xlabel('Iteration')
         ax1.set_ylabel(args.metric.upper())
@@ -349,6 +391,9 @@ def main():
         print(f"\nGraph saved as: {output_file}")
         plt.show()
         
+        # Prepare summary data for CSV export
+        summary_data = []
+        
         # Print analysis summary
         print("\n" + "="*80)
         print(f"{args.metric.upper()} ITERATION ANALYSIS")
@@ -361,16 +406,37 @@ def main():
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]
             stds = [iteration_stats[iter_num]['std'] for iter_num in regular_iterations]
             
+            # Initialize summary row
+            summary_row = {
+                'experiment': exp_name,
+                'metric': args.metric.upper(),
+                'num_prompts': len(final_scores) if final_scores else 0
+            }
+            
             # Print baseline scores if available
             if -1 in iteration_stats:  # Initialized
                 init_score = iteration_stats[-1]['mean']
-                print(f"  Initialized {args.metric.upper()}: {init_score:.4f} ± {iteration_stats[-1]['std']:.4f}")
+                init_std = iteration_stats[-1]['std']
+                print(f"  Initialized {args.metric.upper()}: {init_score:.4f} ± {init_std:.4f}")
+                summary_row['initialized_mean'] = init_score
+                summary_row['initialized_std'] = init_std
             
             if 999 in iteration_stats:  # DDIM GT
                 gt_score = iteration_stats[999]['mean']
-                print(f"  DDIM GT {args.metric.upper()}: {gt_score:.4f} ± {iteration_stats[999]['std']:.4f}")
+                gt_std = iteration_stats[999]['std']
+                print(f"  DDIM GT {args.metric.upper()}: {gt_score:.4f} ± {gt_std:.4f}")
+                summary_row['ddim_gt_mean'] = gt_score
+                summary_row['ddim_gt_std'] = gt_std
             
-            if len(means) >= 2:
+            # Handle sequential experiments (single point)
+            if 'sequential' in exp_name and len(means) == 1:
+                score = means[0]
+                std = stds[0]
+                print(f"  Sequential {args.metric.upper()}: {score:.4f} ± {std:.4f}")
+                summary_row['sequential_mean'] = score
+                summary_row['sequential_std'] = std
+                summary_row['iterations'] = 1
+            elif len(means) >= 2:
                 initial_score = means[0]
                 final_score = means[-1]
                 improvement = final_score - initial_score
@@ -385,11 +451,40 @@ def main():
                 best_iter = regular_iterations[best_iter_idx]
                 best_score = means[best_iter_idx]
                 print(f"  Best iteration: {best_iter} ({args.metric.upper()}: {best_score:.4f})")
+                
+                summary_row['initial_mean'] = initial_score
+                summary_row['initial_std'] = stds[0]
+                summary_row['final_mean'] = final_score
+                summary_row['final_std'] = stds[-1]
+                summary_row['improvement'] = improvement
+                summary_row['iterations'] = len(regular_iterations)
+                summary_row['best_iteration'] = best_iter
+                summary_row['best_score'] = best_score
             
             # Final scores statistics
             if final_scores:
-                print(f"  Final scores mean: {np.mean(final_scores):.4f} ± {np.std(final_scores):.4f}")
-                print(f"  Final scores range: [{np.min(final_scores):.4f}, {np.max(final_scores):.4f}]")
+                final_mean = np.mean(final_scores)
+                final_std = np.std(final_scores)
+                final_min = np.min(final_scores)
+                final_max = np.max(final_scores)
+                
+                print(f"  Final scores mean: {final_mean:.4f} ± {final_std:.4f}")
+                print(f"  Final scores range: [{final_min:.4f}, {final_max:.4f}]")
+                
+                summary_row['final_scores_mean'] = final_mean
+                summary_row['final_scores_std'] = final_std
+                summary_row['final_scores_min'] = final_min
+                summary_row['final_scores_max'] = final_max
+            
+            summary_data.append(summary_row)
+        
+        # Save summary to CSV
+        if summary_data:
+            summary_df = pd.DataFrame(summary_data)
+            folder_name = os.path.basename(base_dir)
+            csv_file = os.path.join(base_dir, f'summary_{args.metric}_{folder_name}.csv')
+            summary_df.to_csv(csv_file, index=False)
+            print(f"\nSummary saved to: {csv_file}")
     
     else:
         print("No valid results found!")
