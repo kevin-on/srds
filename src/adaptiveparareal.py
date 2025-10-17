@@ -264,7 +264,6 @@ class AdaptiveParareal:
             trajectory_convergences.append(convergences)
 
 
-
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
             save_images_as_grid(images, f"{output_dir}/srds_iteration_{srds_iter}.png")
