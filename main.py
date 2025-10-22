@@ -4,13 +4,12 @@ from datetime import datetime
 
 import torch
 
-
-from src.srds import SRDS
+from src.adaptiveparareal import AdaptiveParareal
 from src.sparareal import StochasticParareal
 from src.spararealtts import SPararealTTS
-from src.adaptiveparareal import AdaptiveParareal
-
+from src.srds import SRDS
 from utils.logger import log_info, setup_logging
+
 
 def set_seed(seed: int):
     torch.manual_seed(seed)
@@ -77,14 +76,10 @@ def parse_args():
         default="srds",
         help="Algorithm to use: srds or sparareal",
     )
-    
+
     # Adaptive Parareal
     parser.add_argument(
-        "--adaptive",
-        "-ad",
-        type=int,
-        default=0,
-        help="Adaptive schedule for adaptive Parareal"
+        "--adaptive", "-ad", type=int, default=0, help="Adaptive schedule for adaptive Parareal"
     )
     parser.add_argument(
         "--fine-steps2",
@@ -106,7 +101,7 @@ def parse_args():
         "--sample_type",
         "-st",
         type=str,
-        default=None, #"ddim,eta=1.0",
+        default=None,  # "ddim,eta=1.0",
         help="Method of adding stochasticity",
     )
     parser.add_argument(
@@ -114,7 +109,7 @@ def parse_args():
         "-rs",
         type=str,
         default=None,
-        help="reward scorer for SPararealTTS algorithm"
+        help="reward scorer for SPararealTTS algorithm",
     )
 
     # Optional arguments
@@ -124,28 +119,38 @@ def parse_args():
         default="stabilityai/stable-diffusion-2",
         help="Hugging Face model ID",
     )
-    parser.add_argument("--guidance-scale", type=float, default=7.5, help="classifier-free guidance")
+    parser.add_argument(
+        "--guidance-scale", type=float, default=7.5, help="classifier-free guidance"
+    )
     parser.add_argument("--height", type=int, default=512, help="Image height")
     parser.add_argument("--width", type=int, default=512, help="Image width")
     parser.add_argument("--seed", "-s", type=int, default=42, help="Random seed")
-    parser.add_argument("--log-file", type=str, default="log.txt",help="Log file path")
-    
+    parser.add_argument("--log-file", type=str, default="log.txt", help="Log file path")
+
     return parser.parse_args()
 
 
 def create_main_subdir(base_output_dir, timestamp, args):
     """Create the main subdirectory for this run"""
     if args.algorithm == "sparatts":
-        subdir_name = f"{timestamp}_sparatts_cs{args.coarse_steps}-fs{args.fine_steps}_ns{args.num_samples}"
+        subdir_name = (
+            f"{timestamp}_sparatts_cs{args.coarse_steps}-fs{args.fine_steps}_ns{args.num_samples}"
+        )
     elif args.algorithm == "sparareal":
-        subdir_name = f"{timestamp}_sparareal_cs{args.coarse_steps}-fs{args.fine_steps}_{args.sample_type}-ns{args.num_samples}"
+        subdir_name = (
+            f"{timestamp}_sparareal_cs{args.coarse_steps}-fs{args.fine_steps}_"
+            f"{args.sample_type}-ns{args.num_samples}"
+        )
     elif args.algorithm == "srds":
         subdir_name = f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
     elif args.algorithm == "adaptive":
-        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs2{args.fine_steps2}-fs{args.fine_steps}-ad{args.adaptive}"
+        subdir_name = (
+            f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs2{args.fine_steps2}-"
+            f"fs{args.fine_steps}-ad{args.adaptive}"
+        )
     else:
         raise ValueError(f"Unknown algorithm: {args.algorithm}")
-    
+
     main_output_dir = os.path.join(base_output_dir, subdir_name)
     os.makedirs(main_output_dir, exist_ok=True)
     return main_output_dir
@@ -154,13 +159,15 @@ def create_main_subdir(base_output_dir, timestamp, args):
 def create_prompt_subdir(main_output_dir, prompt_idx, prompt_text):
     """Create a subdirectory for each prompt within the main directory"""
     # 프롬프트를 파일명으로 사용할 수 있도록 정리 (최대 30자)
-    safe_prompt = "".join(c for c in prompt_text[:30] if c.isalnum() or c in (' ', '-', '_')).rstrip()
-    safe_prompt = safe_prompt.replace(' ', '_')
-    
+    safe_prompt = "".join(
+        c for c in prompt_text[:30] if c.isalnum() or c in (" ", "-", "_")
+    ).rstrip()
+    safe_prompt = safe_prompt.replace(" ", "_")
+
     prompt_subdir_name = f"prompt{prompt_idx}_{safe_prompt}"
     prompt_output_dir = os.path.join(main_output_dir, prompt_subdir_name)
     os.makedirs(prompt_output_dir, exist_ok=True)
-    
+
     return prompt_output_dir
 
 
@@ -180,7 +187,7 @@ if __name__ == "__main__":
 
     # Create main subdirectory for this run
     main_output_dir = create_main_subdir(args.output_dir, timestamp, args)
-    
+
     log_file_path = os.path.join(main_output_dir, args.log_file)
     logger = setup_logging(log_file_path)
     log_info(f"Main output directory: {main_output_dir}")
@@ -211,19 +218,20 @@ if __name__ == "__main__":
     all_images = []
     for prompt_idx, prompt in enumerate(prompts):
         log_info(f"Processing prompt {prompt_idx + 1}/{len(prompts)}: {prompt}")
-        
+
         # Create prompt-specific subdirectory within main directory
         prompt_output_dir = create_prompt_subdir(main_output_dir, prompt_idx, prompt)
-        
+
         # Update log file path for this prompt
         log_file_path = os.path.join(prompt_output_dir, args.log_file)
         logger = setup_logging(log_file_path)
-        
+
         log_info(f"Processing prompt: {prompt}")
         log_info(f"Prompt output directory: {prompt_output_dir}")
-        
+
         # 프롬프트 정보 저장
         import json
+
         config = {
             "prompt": prompt,
             "prompt_idx": prompt_idx,
@@ -237,9 +245,9 @@ if __name__ == "__main__":
             "reward_scorer": args.reward_scorer,
             "model": args.model,
             "seed": args.seed,
-            "timestamp": timestamp
+            "timestamp": timestamp,
         }
-        
+
         with open(os.path.join(prompt_output_dir, "config.json"), "w") as f:
             json.dump(config, f, indent=2)
 
@@ -262,7 +270,7 @@ if __name__ == "__main__":
         elif args.algorithm == "sparareal":
             if args.sample_type is None:
                 raise ValueError("sample_type must be specified when using sparareal algorithm")
-            
+
             log_info("Initializing SParareal algorithm...")
             algorithm = StochasticParareal(model_id=args.model)
             log_info("Running SParareal...")
@@ -282,10 +290,12 @@ if __name__ == "__main__":
         elif args.algorithm == "sparatts":
             if args.sample_type is None:
                 raise ValueError("sample_type must be specified when using SpararealTTS algorithm")
-            
+
             if args.reward_scorer is None:
-                raise ValueError("reward_scorer must be specified when using SpararealTTS algorithm")
-            
+                raise ValueError(
+                    "reward_scorer must be specified when using SpararealTTS algorithm"
+                )
+
             log_info("Initializing SPararealTTS algorithm...")
             algorithm = SPararealTTS(model_id=args.model)
             log_info("Running SPararealTTS...")
@@ -301,11 +311,13 @@ if __name__ == "__main__":
                 width=args.width,
                 generator=generator,
                 output_dir=prompt_output_dir,
-                reward_scorer=args.reward_scorer
+                reward_scorer=args.reward_scorer,
             )
         elif args.algorithm == "adaptive":
             if args.fine_steps2 is None:
-                raise ValueError("fine_steps2 must be specified when using AdaptivePrareal algorithm")
+                raise ValueError(
+                    "fine_steps2 must be specified when using AdaptivePrareal algorithm"
+                )
             log_info("Initializing Adaptive Parareal algorithm...")
             algorithm = AdaptiveParareal(model_id=args.model)
             log_info("Running Adaptive Parareal...")
@@ -322,7 +334,7 @@ if __name__ == "__main__":
                 generator=generator,
                 output_dir=prompt_output_dir,
             )
-            
+
         else:
             raise ValueError(f"Unknown algorithm: {args.algorithm}")
 
