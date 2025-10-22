@@ -385,7 +385,8 @@ def main():
                     total_improvement = valid_means[0] - valid_means[-1]
                     avg_improvement_per_iter = total_improvement / (len(valid_means) - 1)
                     print(
-                        f"  Convergence - Initial: {valid_means[0]:.4f}, Final: {valid_means[-1]:.4f}"
+                        f"  Convergence - Initial: {valid_means[0]:.4f}, "
+                        f"Final: {valid_means[-1]:.4f}"
                     )
                     print(f"  Convergence - Total improvement: {total_improvement:.4f}")
                     print(f"  Convergence - Avg improvement/iter: {avg_improvement_per_iter:.4f}")
@@ -403,7 +404,8 @@ def main():
                     total_improvement = valid_means[0] - valid_means[-1]
                     avg_improvement_per_iter = total_improvement / (len(valid_means) - 1)
                     print(
-                        f"  L1 Distance - Initial: {valid_means[0]:.4f}, Final: {valid_means[-1]:.4f}"
+                        f"  L1 Distance - Initial: {valid_means[0]:.4f}, "
+                        f"Final: {valid_means[-1]:.4f}"
                     )
                     print(f"  L1 Distance - Total improvement: {total_improvement:.4f}")
                     print(f"  L1 Distance - Avg improvement/iter: {avg_improvement_per_iter:.4f}")

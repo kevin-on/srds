@@ -234,7 +234,8 @@ class SPararealTTS(StochasticParareal):
                     ]
 
             get_tqdm_logger().write(
-                f"SParareal Iteration {srds_iter + 1}/{coarse_num_inference_steps} - Processing fine steps"
+                f"SParareal Iteration {srds_iter + 1}/{coarse_num_inference_steps} - "
+                f"Processing fine steps"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 timestep_start = coarse_timesteps[i - 1]
@@ -274,10 +275,12 @@ class SPararealTTS(StochasticParareal):
                         reward_idx=best_reward_idx,
                     )
                     get_tqdm_logger().write(
-                        f"  Best reward score (idx={best_reward_idx}, BLUE border): {reward_scores[best_reward_idx]:.4f} "
+                        f"  Best reward score (idx={best_reward_idx}, BLUE border): "
+                        f"{reward_scores[best_reward_idx]:.4f} "
                     )
                     # get_tqdm_logger().write(
-                    #     f"  Selected sample (idx={min_idx}, RED border) has reward score: {reward_scores[min_idx]:.4f}"
+                    #     f"  Selected sample (idx={min_idx}, RED border) has "
+                    #     f"reward score: {reward_scores[min_idx]:.4f}"
                     # )
 
                 else:
@@ -289,7 +292,8 @@ class SPararealTTS(StochasticParareal):
                     cur_fine_prediction[i] = fine_trajectory_samples[i][min_idx]
 
                     get_tqdm_logger().write(
-                        f"  Timestep {i}: Selected candidate {min_idx} (is_original: {min_idx == 0})"
+                        f"  Timestep {i}: Selected candidate {min_idx} "
+                        f"(is_original: {min_idx == 0})"
                     )
                     get_tqdm_logger().write(f"    Distances: {[f'{d:.6f}' for d in distances]}")
 
@@ -308,7 +312,8 @@ class SPararealTTS(StochasticParareal):
                 )
 
             get_tqdm_logger().write(
-                f"SParareal Iteration {srds_iter + 1}/{coarse_num_inference_steps} - Processing coarse sweep"
+                f"SParareal Iteration {srds_iter + 1}/{coarse_num_inference_steps} - "
+                f"Processing coarse sweep"
             )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
                 cur_coarse_prediction[i] = diffusion_step(  # line 10 of Algorithm 1
@@ -349,7 +354,8 @@ class SPararealTTS(StochasticParareal):
                 )
                 status = "CONVERGED" if l1_distance < tolerance else "continuing"
                 get_tqdm_logger().write(
-                    f"SParareal Iteration {srds_iter + 1}: L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
+                    f"SParareal Iteration {srds_iter + 1}: L1={l1_distance:.6f} "
+                    f"(tolerance={tolerance}) - {status}"
                 )
 
                 if l1_distance < tolerance:

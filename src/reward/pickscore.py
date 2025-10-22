@@ -110,8 +110,14 @@ if __name__ == "__main__":
         Image.open(
             "/home2/junoh/2025_para_scaling/srds/output/sparatts_test/20251013_080911_cs10-fs100/srds_final.png"
         ),
-        # Image.open("/home2/junoh/2025_para_scaling/srds/output/sparatts_test/20251013_074203_cs10-fs100/srds_final.png"),
-        # Image.open("/home2/junoh/2025_para_scaling/srds/output/sparatts_test/20251013_074003_cs10-fs100/srds_iteration_9.png")
+        # Image.open(
+        #     "/home2/junoh/2025_para_scaling/srds/output/"
+        #     "sparatts_test/20251013_074203_cs10-fs100/srds_final.png"
+        # ),
+        # Image.open(
+        #     "/home2/junoh/2025_para_scaling/srds/output/"
+        #     "sparatts_test/20251013_074003_cs10-fs100/srds_iteration_9.png"
+        # )
     ]
     prompt = "a photo of a dog and a cat"
 

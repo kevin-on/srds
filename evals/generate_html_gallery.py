@@ -110,7 +110,11 @@ def generate_html_gallery(base_dir):
         h1 {{ text-align: center; color: #333; }}
         .prompt-section {{ margin: 20px 0; border: 1px solid #ddd; padding: 10px; }}
         .prompt-title {{ font-weight: bold; margin-bottom: 10px; color: #555; }}
-        .methods-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }}
+        .methods-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }}
         .method {{ text-align: center; }}
         .method-name {{ font-size: 12px; margin-bottom: 5px; color: #666; }}
         .method-image {{ width: 120px; height: 120px; object-fit: cover; border: 1px solid #ccc; }}

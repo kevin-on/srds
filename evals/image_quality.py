@@ -320,7 +320,8 @@ def main():
         )
         if iteration_stats is not None:
             results.append((exp_name, iteration_stats, final_scores))
-            # Collect baseline scores from first experiment only (they should be same across experiments)
+            # Collect baseline scores from first experiment only
+            # (they should be same across experiments)
             if not all_baseline_scores["ddim_gt"]:  # Only collect from first experiment
                 all_baseline_scores = baseline_scores
 

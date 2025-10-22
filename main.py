@@ -137,11 +137,17 @@ def create_main_subdir(base_output_dir, timestamp, args):
             f"{timestamp}_sparatts_cs{args.coarse_steps}-fs{args.fine_steps}_ns{args.num_samples}"
         )
     elif args.algorithm == "sparareal":
-        subdir_name = f"{timestamp}_sparareal_cs{args.coarse_steps}-fs{args.fine_steps}_{args.sample_type}-ns{args.num_samples}"
+        subdir_name = (
+            f"{timestamp}_sparareal_cs{args.coarse_steps}-fs{args.fine_steps}_"
+            f"{args.sample_type}-ns{args.num_samples}"
+        )
     elif args.algorithm == "srds":
         subdir_name = f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
     elif args.algorithm == "adaptive":
-        subdir_name = f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs2{args.fine_steps2}-fs{args.fine_steps}-ad{args.adaptive}"
+        subdir_name = (
+            f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs2{args.fine_steps2}-"
+            f"fs{args.fine_steps}-ad{args.adaptive}"
+        )
     else:
         raise ValueError(f"Unknown algorithm: {args.algorithm}")
 
