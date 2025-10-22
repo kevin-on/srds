@@ -54,6 +54,17 @@ def extract_experiment_name(dir_path):
     
     return "unknown"
 
+def extract_legend_name(dir_path):
+    """Extract legend name from directory name (everything after timestamp)"""
+    dir_name = os.path.basename(dir_path)
+    
+    # Remove timestamp pattern (YYYYMMDD_HHMMSS_)
+    match = re.match(r'\d{8}_\d{6}_(.+)', dir_name)
+    if match:
+        return match.group(1)
+    
+    return dir_name
+
 def extract_prompt_from_dir(prompt_dir):
     """Extract prompt text from directory name"""
     dir_name = os.path.basename(prompt_dir)
@@ -314,13 +325,17 @@ def main():
             regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0 and k < 999]
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]
             
+            # Get legend name from exp_dir
+            exp_dir = exp_dirs[i]
+            legend_name = extract_legend_name(exp_dir)
+            
             # For sequential experiments, plot as a single point
             if 'sequential' in exp_name and len(regular_iterations) == 1:
                 ax1.plot(regular_iterations, means, 'o', 
-                        label=f'{exp_name}', color=colors[i], markersize=8)
+                        label=f'{legend_name}', color=colors[i], markersize=8)
             else:
                 ax1.plot(regular_iterations, means, 'o-', 
-                        label=f'{exp_name}', color=colors[i], linewidth=2.5, markersize=6)
+                        label=f'{legend_name}', color=colors[i], linewidth=2.5, markersize=6)
         
         ax1.set_xlabel('Iteration')
         ax1.set_ylabel(args.metric.upper())
@@ -364,9 +379,12 @@ def main():
         exp_names = [result[0] for result in results]
         final_score_data = [result[2] for result in results]
         
+        # Get legend names for experiments
+        legend_names = [extract_legend_name(exp_dirs[i]) for i in range(len(results))]
+        
         # Combine baseline and experiment data
         all_data = baseline_data + final_score_data
-        all_labels = baseline_labels + exp_names
+        all_labels = baseline_labels + legend_names
         all_colors = baseline_colors + list(colors)
         
         bp = ax2.boxplot(all_data, labels=all_labels, patch_artist=True)
@@ -399,8 +417,10 @@ def main():
         print(f"{args.metric.upper()} ITERATION ANALYSIS")
         print("="*80)
         
-        for exp_name, iteration_stats, final_scores in results:
-            print(f"\n{exp_name}:")
+        for i, (exp_name, iteration_stats, final_scores) in enumerate(results):
+            exp_dir = exp_dirs[i]
+            legend_name = extract_legend_name(exp_dir)
+            print(f"\n{legend_name}:")
             # Filter out special iterations (keep only regular iterations 0-9)
             regular_iterations = [k for k in sorted(iteration_stats.keys()) if k >= 0 and k < 999]
             means = [iteration_stats[iter_num]['mean'] for iter_num in regular_iterations]

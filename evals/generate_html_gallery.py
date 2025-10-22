@@ -13,11 +13,37 @@ from pathlib import Path
 def extract_experiment_name(dir_path):
     """Extract experiment configuration from directory name"""
     dir_name = os.path.basename(dir_path)
+    
     # Extract adaptive parameter (ad0, ad2, ad4, etc.)
     match = re.search(r'ad(\d+)', dir_name)
     if match:
         return f"ad{match.group(1)}"
+    
+    # Extract sequential steps (sequential_ddim50, sequential_ddim100, etc.)
+    match = re.search(r'sequential_ddim(\d+)', dir_name)
+    if match:
+        return f"sequential_{match.group(1)}"
+    
+    # Extract other algorithm types
+    if 'srds' in dir_name:
+        return 'srds'
+    elif 'sparareal' in dir_name:
+        return 'sparareal'
+    elif 'sparatts' in dir_name:
+        return 'sparatts'
+    
     return "unknown"
+
+def extract_legend_name(dir_path):
+    """Extract legend name from directory name (everything after timestamp)"""
+    dir_name = os.path.basename(dir_path)
+    
+    # Remove timestamp pattern (YYYYMMDD_HHMMSS_)
+    match = re.match(r'\d{8}_\d{6}_(.+)', dir_name)
+    if match:
+        return match.group(1)
+    
+    return dir_name
 
 def extract_prompt_from_dir(prompt_dir):
     """Extract prompt text from directory name"""
@@ -99,6 +125,7 @@ def generate_html_gallery(base_dir):
     
     for exp_dir in exp_dirs:
         exp_name = extract_experiment_name(exp_dir)
+        legend_name = extract_legend_name(exp_dir)
         prompt_dirs = glob.glob(os.path.join(exp_dir, "prompt*"))
         prompt_dirs.sort()
         
@@ -115,7 +142,7 @@ def generate_html_gallery(base_dir):
             if 'final' in images:
                 img = images['final']
                 relative_img_path = os.path.relpath(img['path'], base_dir)
-                prompt_data[prompt_text][exp_name] = {
+                prompt_data[prompt_text][legend_name] = {
                     'image_path': relative_img_path,
                     'filename': img['filename']
                 }

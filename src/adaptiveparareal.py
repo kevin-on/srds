@@ -200,7 +200,7 @@ class AdaptiveParareal:
             None  # Previous final image for L1 convergence check
         )
         for srds_iter in tqdm(
-            range(1000), desc="SRDS Iterations"
+            range(coarse_num_inference_steps), desc="SRDS Iterations"
         ):  # line 6 of Algorithm 1
             # cur_fine_prediction starts from prev_corrected_solution
             for i in range(1, coarse_num_inference_steps + 1):
@@ -210,16 +210,15 @@ class AdaptiveParareal:
                 f"SRDS Iteration {srds_iter + 1} "
                 "- Processing fine steps"
             )
+            if srds_iter < adaptive:
+                cur_scheduler_fine = scheduler_fine_sub
+            else:
+                cur_scheduler_fine = scheduler_fine
+
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 timestep_start = coarse_timesteps[i - 1]
                 timestep_end = coarse_timesteps[i] if i < coarse_num_inference_steps else -1
                 
-                #FIXME
-                if i < 1 + adaptive:
-                    cur_scheduler_fine = scheduler_fine_sub
-                else:
-                    cur_scheduler_fine = scheduler_fine
-
                 cur_fine_prediction[i] = diffusion_step(
                     latents=cur_fine_prediction[i],
                     timestep=timestep_start,
