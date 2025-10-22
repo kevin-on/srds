@@ -1,6 +1,9 @@
 # python
 __pycache__/
 
+# ruff
+.ruff_cache/
+
 # output
 output
 output_131
