@@ -87,7 +87,10 @@ def parse_args():
         "-st",
         type=str,
         default="ddim,eta=1.0",
-        help="Stochasticity",
+        help="Sampling strategy for SParareal. "
+        "Options: 'ddim,eta=X' (X=0.0-1.0, stochasticity), "
+        "'dir,scale=X' (directional shooting scale), "
+        "'noise,scale=X,rule=Y' (Y=isotropic|delta_coarse|delta_corrected|delta_fine)",
     )
     # Optional arguments
     parser.add_argument(

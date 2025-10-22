@@ -14,6 +14,23 @@ from utils.utils import decode_latents_to_pil, parse_sample_type, save_images_as
 
 class StochasticParareal(SRDS):
     @torch.no_grad()
+    def _sample_latents_noise(
+        self,
+        num_samples: int,
+        latent: torch.Tensor,
+        std_scale: float = 1.0,
+        std_mean: Optional[torch.Tensor] = None,
+    ) -> List[torch.Tensor]:
+        if num_samples < 1:
+            raise ValueError("num_samples must be at least 1")
+
+        std = std_mean * std_scale if std_mean is not None else std_scale
+        return [
+            latent,
+            *[latent + torch.randn_like(latent) * std for _ in range(num_samples - 1)],
+        ]
+
+    @torch.no_grad()
     def _sample_latents_ddim(
         self,
         num_samples: int,
@@ -195,6 +212,17 @@ class StochasticParareal(SRDS):
             initial_latents.clone() for _ in range(coarse_num_inference_steps + 1)
         ]  # G_n(alpha_k^{n-1})
 
+        # Element-wise absolute differences: used for noise sampling
+        prev_abs_delta_coarse_prediction: List[torch.Tensor] = [
+            torch.zeros_like(initial_latents) for _ in range(coarse_num_inference_steps + 1)
+        ]  # |G_n(U_{k-1}^{n-1}) - G_n(U_{k-2}^{n-1})|
+        prev_abs_delta_corrected_solution: List[torch.Tensor] = [
+            torch.zeros_like(initial_latents) for _ in range(coarse_num_inference_steps + 1)
+        ]  # |U_{k-1}^n - U_{k-2}^n|
+        prev_abs_delta_fine_prediction: List[torch.Tensor] = [
+            torch.zeros_like(initial_latents) for _ in range(coarse_num_inference_steps + 1)
+        ]  # |F_n(U_{k-1}^{n-1}) - F_n(U_{k-2}^{n-1})|
+
         # Initialize previous solutions
         for i in range(1, coarse_num_inference_steps + 1):  # line 2 of Algorithm 1
             prev_coarse_prediction[i] = diffusion_step(  # line 3 of Algorithm 1
@@ -231,6 +259,10 @@ class StochasticParareal(SRDS):
             # cur_fine_prediction starts from prev_corrected_solution
             sample_config = parse_sample_type(sample_type)
             if sample_config["method"] == "ddim":
+                """
+                kwargs:
+                    eta: DDIM eta parameter (default: 0.0)
+                """
                 for i in range(1, coarse_num_inference_steps + 1):
                     # FIXME
                     if i == 1:
@@ -252,6 +284,10 @@ class StochasticParareal(SRDS):
                             )
                         ]
             elif sample_config["method"] == "dir":
+                """
+                kwargs:
+                    scale: Scale for direction sampling
+                """
                 for i in range(1, coarse_num_inference_steps + 1):
                     fine_trajectory_samples[i] = [
                         TrajectorySegment(x, x)
@@ -265,6 +301,40 @@ class StochasticParareal(SRDS):
                             **sample_config["kwargs"],
                         )
                     ]
+            elif sample_config["method"] == "noise":
+                """
+                kwargs:
+                    scale: Noise scaling factor (default: 1.0)
+                    rule: Std deviation method - isotropic | delta_coarse | delta_corrected |
+                          delta_fine
+                """
+                std_scale = sample_config["kwargs"].get("scale", 1.0)
+                rule = sample_config["kwargs"].get("rule")
+
+                for i in range(1, coarse_num_inference_steps + 1):
+                    if rule == "isotropic":
+                        std_mean = None
+                    elif rule == "delta_coarse":
+                        std_mean = prev_abs_delta_coarse_prediction[i]
+                    elif rule == "delta_corrected":
+                        std_mean = prev_abs_delta_corrected_solution[i]
+                    elif rule == "delta_fine":
+                        std_mean = prev_abs_delta_fine_prediction[i]
+                    else:
+                        raise ValueError(f"Invalid rule: {rule}")
+
+                    fine_trajectory_samples[i] = [
+                        TrajectorySegment(x, x)
+                        for x in self._sample_latents_noise(
+                            num_samples=num_samples,
+                            latent=prev_corrected_solution[i - 1].clone(),
+                            std_mean=std_mean,
+                            std_scale=std_scale,
+                        )
+                    ]
+            else:
+                raise ValueError(f"Invalid sample type: {sample_config['method']}")
+
             get_tqdm_logger().write(
                 f"SParareal Iteration {srds_iter + 1}/{coarse_num_inference_steps} "
                 "- Processing fine steps"
@@ -354,6 +424,20 @@ class StochasticParareal(SRDS):
 
                 if l1_distance < tolerance:
                     break
+
+            # Update absolute differences
+            prev_abs_delta_coarse_prediction = [
+                torch.abs(cur_coarse_prediction[i] - prev_coarse_prediction[i])
+                for i in range(coarse_num_inference_steps + 1)
+            ]
+            prev_abs_delta_corrected_solution = [
+                torch.abs(cur_corrected_solution[i] - prev_corrected_solution[i])
+                for i in range(coarse_num_inference_steps + 1)
+            ]
+            prev_abs_delta_fine_prediction = [
+                torch.abs(cur_fine_prediction[i].end - prev_fine_prediction[i].end)
+                for i in range(coarse_num_inference_steps + 1)
+            ]
 
             # Update previous solutions (line 12 of Algorithm 1)
             prev_coarse_prediction[:] = cur_coarse_prediction
