@@ -20,6 +20,7 @@ Future Enhancements:
 - Implement pipelining
 """
 
+
 class AdaptiveParareal:
     def __init__(
         self,
@@ -49,7 +50,7 @@ class AdaptiveParareal:
         prompts: List[str],
         coarse_num_inference_steps: int,
         fine_num_inference_steps: int,
-        fine_num_inference_steps_sub: int, 
+        fine_num_inference_steps_sub: int,
         tolerance: float,
         adaptive: int,
         guidance_scale: float = 7.5,
@@ -78,20 +79,25 @@ class AdaptiveParareal:
         scheduler_coarse.set_timesteps(coarse_num_inference_steps)
         scheduler_fine.set_timesteps(fine_num_inference_steps)
         scheduler_fine_sub.set_timesteps(fine_num_inference_steps_sub)
-        
+
         coarse_timesteps = scheduler_coarse.timesteps
         fine_timesteps = scheduler_fine.timesteps
         fine_timesteps_sub = scheduler_fine_sub.timesteps
-        if not (all(t in fine_timesteps for t in coarse_timesteps) and all(t in fine_timesteps_sub for t in coarse_timesteps)):
+        if not (
+            all(t in fine_timesteps for t in coarse_timesteps)
+            and all(t in fine_timesteps_sub for t in coarse_timesteps)
+        ):
             raise ValueError("The coarse timesteps are not a subset of the fine timesteps")
-        
+
         # Timestep setup
         get_logger().info("SRDS Algorithm Configuration:")
         get_logger().info(
             f"  Coarse steps: {len(coarse_timesteps)} | timesteps: {coarse_timesteps}"
         )
         get_logger().info(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
-        get_logger().info(f"  Fine steps2: {len(fine_timesteps_sub)} | timesteps: {fine_timesteps_sub}")
+        get_logger().info(
+            f"  Fine steps2: {len(fine_timesteps_sub)} | timesteps: {fine_timesteps_sub}"
+        )
         # Create a copy of the pipeline with the coarse scheduler
         pipe_coarse = StableDiffusionPipeline(
             vae=self.pipe.vae,
@@ -206,10 +212,7 @@ class AdaptiveParareal:
             for i in range(1, coarse_num_inference_steps + 1):
                 cur_fine_prediction[i] = prev_corrected_solution[i - 1].clone()
 
-            get_tqdm_logger().write(
-                f"SRDS Iteration {srds_iter + 1} "
-                "- Processing fine steps"
-            )
+            get_tqdm_logger().write(f"SRDS Iteration {srds_iter + 1} - Processing fine steps")
             if srds_iter < adaptive:
                 cur_scheduler_fine = scheduler_fine_sub
             else:
@@ -218,7 +221,7 @@ class AdaptiveParareal:
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 timestep_start = coarse_timesteps[i - 1]
                 timestep_end = coarse_timesteps[i] if i < coarse_num_inference_steps else -1
-                
+
                 cur_fine_prediction[i] = diffusion_step(
                     latents=cur_fine_prediction[i],
                     timestep=timestep_start,
@@ -230,10 +233,7 @@ class AdaptiveParareal:
                     do_classifier_free_guidance=do_classifier_free_guidance,
                 )
 
-            get_tqdm_logger().write(
-                f"SRDS Iteration {srds_iter + 1} "
-                "- Processing coarse sweep"
-            )
+            get_tqdm_logger().write(f"SRDS Iteration {srds_iter + 1} - Processing coarse sweep")
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
                 cur_coarse_prediction[i] = diffusion_step(  # line 10 of Algorithm 1
                     cur_corrected_solution[i - 1],
@@ -250,9 +250,7 @@ class AdaptiveParareal:
 
             errors = []
             for i in range(1, coarse_num_inference_steps + 1):
-                errors.append(
-                    torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
-                )
+                errors.append(torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item())
             gt_trajectory_errors.append(errors)
 
             convergences = []
@@ -261,7 +259,6 @@ class AdaptiveParareal:
                     torch.norm(cur_corrected_solution[i] - prev_corrected_solution[i]).item()
                 )
             trajectory_convergences.append(convergences)
-
 
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
@@ -294,7 +291,12 @@ class AdaptiveParareal:
         gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
-            images, gt_images, gt_trajectory_errors, trajectory_convergences, coarse_num_inference_steps, output_dir
+            images,
+            gt_images,
+            gt_trajectory_errors,
+            trajectory_convergences,
+            coarse_num_inference_steps,
+            output_dir,
         )
 
         l1_distance = np.average(
@@ -420,9 +422,10 @@ class AdaptiveParareal:
             plt.grid(True, alpha=0.3)
             plt.yscale("log")  # Using log scale since values vary greatly
             plt.tight_layout()
-            plt.savefig(f"{output_dir}/_gt_trajectory_errors_plot.png", dpi=300, bbox_inches="tight")
+            plt.savefig(
+                f"{output_dir}/_gt_trajectory_errors_plot.png", dpi=300, bbox_inches="tight"
+            )
             plt.show()
-
 
         if trajectory_convergences:
             df = pd.DataFrame(
@@ -447,5 +450,7 @@ class AdaptiveParareal:
             plt.grid(True, alpha=0.3)
             plt.yscale("log")  # Using log scale since values vary greatly
             plt.tight_layout()
-            plt.savefig(f"{output_dir}/_trajectory_convergences_plot.png", dpi=300, bbox_inches="tight")
+            plt.savefig(
+                f"{output_dir}/_trajectory_convergences_plot.png", dpi=300, bbox_inches="tight"
+            )
             plt.show()

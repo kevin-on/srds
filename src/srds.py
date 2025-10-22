@@ -238,9 +238,7 @@ class SRDS:
 
             errors = []
             for i in range(1, coarse_num_inference_steps + 1):
-                errors.append(
-                    torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
-                )
+                errors.append(torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item())
             gt_trajectory_errors.append(errors)
 
             convergences = []
@@ -281,7 +279,12 @@ class SRDS:
         gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
-            images, gt_images, gt_trajectory_errors, trajectory_convergences, coarse_num_inference_steps, output_dir
+            images,
+            gt_images,
+            gt_trajectory_errors,
+            trajectory_convergences,
+            coarse_num_inference_steps,
+            output_dir,
         )
 
         l1_distance = np.average(
@@ -407,7 +410,9 @@ class SRDS:
             plt.grid(True, alpha=0.3)
             plt.yscale("log")  # Using log scale since values vary greatly
             plt.tight_layout()
-            plt.savefig(f"{output_dir}/_gt_trajectory_errors_plot.png", dpi=300, bbox_inches="tight")
+            plt.savefig(
+                f"{output_dir}/_gt_trajectory_errors_plot.png", dpi=300, bbox_inches="tight"
+            )
             plt.show()
 
         # Save trajectory convergences to CSV
@@ -434,5 +439,7 @@ class SRDS:
             plt.grid(True, alpha=0.3)
             plt.yscale("log")  # Using log scale since values vary greatly
             plt.tight_layout()
-            plt.savefig(f"{output_dir}/_trajectory_convergences_plot.png", dpi=300, bbox_inches="tight")
+            plt.savefig(
+                f"{output_dir}/_trajectory_convergences_plot.png", dpi=300, bbox_inches="tight"
+            )
             plt.show()

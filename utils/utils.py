@@ -50,14 +50,14 @@ def decode_latents_to_pil(
 
 
 def save_images_as_grid(
-    images: List[Image.Image], 
-    output_path: str, 
+    images: List[Image.Image],
+    output_path: str,
     grid_cols: int = None,
     selected_idx: int = None,
-    reward_idx: int = None
+    reward_idx: int = None,
 ):
     """Save multiple PIL images as a grid.
-    
+
     Args:
         images: List of PIL images to arrange in a grid
         output_path: Path to save the grid image
@@ -82,44 +82,37 @@ def save_images_as_grid(
         col = idx % grid_cols
         x = col * img_width
         y = row * img_height
-        
+
         img_copy = img.copy()
         needs_border = False
-        
+
         # Add borders if this image is selected or has best reward score
         if selected_idx is not None and idx == selected_idx:
             from PIL import ImageDraw
+
             draw = ImageDraw.Draw(img_copy)
             border_width = 10
             # Draw red border (selected by distance metric)
             for i in range(border_width):
-                draw.rectangle(
-                    [i, i, img_width - 1 - i, img_height - 1 - i],
-                    outline="red"
-                )
+                draw.rectangle([i, i, img_width - 1 - i, img_height - 1 - i], outline="red")
             needs_border = True
-        
+
         if reward_idx is not None and idx == reward_idx:
             from PIL import ImageDraw
+
             draw = ImageDraw.Draw(img_copy)
             border_width = 10
             # If it's also the selected one, draw blue border inside red border
             if selected_idx is not None and idx == selected_idx:
                 # Draw blue border inside the red border
                 for i in range(border_width, border_width * 2):
-                    draw.rectangle(
-                        [i, i, img_width - 1 - i, img_height - 1 - i],
-                        outline="blue"
-                    )
+                    draw.rectangle([i, i, img_width - 1 - i, img_height - 1 - i], outline="blue")
             else:
                 # Draw blue border only
                 for i in range(border_width):
-                    draw.rectangle(
-                        [i, i, img_width - 1 - i, img_height - 1 - i],
-                        outline="blue"
-                    )
+                    draw.rectangle([i, i, img_width - 1 - i, img_height - 1 - i], outline="blue")
             needs_border = True
-        
+
         if needs_border:
             grid_image.paste(img_copy, (x, y))
         else:

@@ -333,9 +333,7 @@ class StochasticParareal(SRDS):
 
             errors = []
             for i in range(1, coarse_num_inference_steps + 1):
-                errors.append(
-                    torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item()
-                )
+                errors.append(torch.norm(cur_corrected_solution[i] - gt_trajectory[i]).item())
             gt_trajectory_errors.append(errors)
 
             convergences = []
@@ -376,7 +374,12 @@ class StochasticParareal(SRDS):
         gt_images = decode_latents_to_pil(gt_trajectory[-1], pipe_coarse)
 
         self._save_outputs(
-            images, gt_images, gt_trajectory_errors, trajectory_convergences, coarse_num_inference_steps, output_dir
+            images,
+            gt_images,
+            gt_trajectory_errors,
+            trajectory_convergences,
+            coarse_num_inference_steps,
+            output_dir,
         )
 
         l1_distance = np.average(

@@ -4,10 +4,8 @@ from datetime import datetime
 
 import torch
 from diffusers import DDIMScheduler, StableDiffusionPipeline
-from PIL import Image
 
 from utils.logger import log_info, setup_logging
-from utils.utils import save_images_as_grid
 
 
 def set_seed(seed: int):
@@ -63,12 +61,14 @@ def parse_args():
         default="stabilityai/stable-diffusion-2",
         help="Hugging Face model ID",
     )
-    parser.add_argument("--guidance-scale", type=float, default=7.5, help="classifier-free guidance")
+    parser.add_argument(
+        "--guidance-scale", type=float, default=7.5, help="classifier-free guidance"
+    )
     parser.add_argument("--height", type=int, default=512, help="Image height")
     parser.add_argument("--width", type=int, default=512, help="Image width")
     parser.add_argument("--seed", "-s", type=int, default=42, help="Random seed")
     parser.add_argument("--log-file", type=str, default="log.txt", help="Log file path")
-    
+
     return parser.parse_args()
 
 
@@ -83,13 +83,15 @@ def create_main_subdir(base_output_dir, timestamp, args):
 def create_prompt_subdir(main_output_dir, prompt_idx, prompt_text):
     """Create a subdirectory for each prompt within the main directory"""
     # 프롬프트를 파일명으로 사용할 수 있도록 정리 (최대 30자)
-    safe_prompt = "".join(c for c in prompt_text[:30] if c.isalnum() or c in (' ', '-', '_')).rstrip()
-    safe_prompt = safe_prompt.replace(' ', '_')
-    
+    safe_prompt = "".join(
+        c for c in prompt_text[:30] if c.isalnum() or c in (" ", "-", "_")
+    ).rstrip()
+    safe_prompt = safe_prompt.replace(" ", "_")
+
     prompt_subdir_name = f"prompt{prompt_idx}_{safe_prompt}"
     prompt_output_dir = os.path.join(main_output_dir, prompt_subdir_name)
     os.makedirs(prompt_output_dir, exist_ok=True)
-    
+
     return prompt_output_dir
 
 
@@ -102,27 +104,27 @@ def run_sequential_sampling(
     width,
     generator,
     output_dir,
-    logger
+    logger,
 ):
     """Run sequential DDIM sampling for given prompts"""
-    
+
     log_info("Loading Stable Diffusion pipeline...")
     pipe = StableDiffusionPipeline.from_pretrained(
         model_id,
         torch_dtype=torch.float16,
     )
     pipe = pipe.to("cuda")
-    
+
     # Use DDIM scheduler
     pipe.scheduler = DDIMScheduler.from_pretrained(
         model_id, subfolder="scheduler", timestep_spacing="trailing"
     )
-    
+
     log_info(f"Running sequential DDIM sampling with {num_inference_steps} steps...")
-    
+
     for prompt_idx, prompt in enumerate(prompts):
         log_info(f"Processing prompt {prompt_idx + 1}/{len(prompts)}: {prompt}")
-        
+
         # Generate image using sequential DDIM
         with torch.no_grad():
             images = pipe(
@@ -133,14 +135,13 @@ def run_sequential_sampling(
                 width=width,
                 generator=generator,
             ).images
-        
+
         # Save individual image
         for img_idx, img in enumerate(images):
             img.save(os.path.join(output_dir, f"sequential_image_{prompt_idx}_{img_idx}.png"))
-        
+
         log_info(f"Completed prompt {prompt_idx + 1}/{len(prompts)}")
-    
-    
+
     return all_images
 
 
@@ -160,7 +161,7 @@ if __name__ == "__main__":
 
     # Create main subdirectory for this run
     main_output_dir = create_main_subdir(args.output_dir, timestamp, args)
-    
+
     log_file_path = os.path.join(main_output_dir, args.log_file)
     logger = setup_logging(log_file_path)
     log_info(f"Main output directory: {main_output_dir}")
@@ -181,19 +182,20 @@ if __name__ == "__main__":
     all_images = []
     for prompt_idx, prompt in enumerate(prompts):
         log_info(f"Processing prompt {prompt_idx + 1}/{len(prompts)}: {prompt}")
-        
+
         # Create prompt-specific subdirectory within main directory
         prompt_output_dir = create_prompt_subdir(main_output_dir, prompt_idx, prompt)
-        
+
         # Update log file path for this prompt
         log_file_path = os.path.join(prompt_output_dir, args.log_file)
         logger = setup_logging(log_file_path)
-        
+
         log_info(f"Processing prompt: {prompt}")
         log_info(f"Prompt output directory: {prompt_output_dir}")
-        
+
         # 프롬프트 정보 저장
         import json
+
         config = {
             "prompt": prompt,
             "prompt_idx": prompt_idx,
@@ -204,9 +206,9 @@ if __name__ == "__main__":
             "seed": args.seed,
             "timestamp": timestamp,
             "height": args.height,
-            "width": args.width
+            "width": args.width,
         }
-        
+
         with open(os.path.join(prompt_output_dir, "config.json"), "w") as f:
             json.dump(config, f, indent=2)
 
@@ -220,9 +222,9 @@ if __name__ == "__main__":
             width=args.width,
             generator=generator,
             output_dir=prompt_output_dir,
-            logger=logger
+            logger=logger,
         )
-        
+
         all_images.extend(images)
         log_info(f"Completed prompt {prompt_idx + 1}/{len(prompts)}")
 
