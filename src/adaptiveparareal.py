@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,6 +11,58 @@ from tqdm import tqdm
 from src.diffusion import diffusion_step
 from utils.logger import get_logger, get_tqdm_logger
 from utils.utils import decode_latents_to_pil, save_images_as_grid
+
+
+def parse_fine_steps_schedule(schedule_str: str) -> List[Tuple[int, int]]:
+    """
+    Parse fine steps schedule from string format to list of tuples.
+
+    Args:
+        schedule_str: Schedule in format "32x3,64x2,128x10"
+                     where each segment is "steps x iterations"
+
+    Returns:
+        List of (num_steps, num_iterations) tuples
+
+    Example:
+        "32x3,64x2,128x10" -> [(32, 3), (64, 2), (128, 10)]
+    """
+    if not schedule_str:
+        raise ValueError("Schedule string cannot be empty")
+
+    schedule = []
+    segments = schedule_str.split(",")
+
+    for segment in segments:
+        segment = segment.strip()
+        if "x" not in segment:
+            raise ValueError(
+                f"Invalid schedule segment: '{segment}'. Expected format: 'stepsxiterations'"
+            )
+
+        parts = segment.split("x")
+        if len(parts) != 2:
+            raise ValueError(
+                f"Invalid schedule segment: '{segment}'. Expected format: 'stepsxiterations'"
+            )
+
+        try:
+            num_steps = int(parts[0])
+            num_iterations = int(parts[1])
+        except ValueError:
+            raise ValueError(
+                f"Invalid schedule segment: '{segment}'. Steps and iterations must be integers"
+            )
+
+        if num_steps <= 0 or num_iterations <= 0:
+            raise ValueError(
+                f"Invalid schedule segment: '{segment}'. Steps and iterations must be positive"
+            )
+
+        schedule.append((num_steps, num_iterations))
+
+    return schedule
+
 
 """
 Implementation of Self-Refining Diffusion Samplers (SRDS) algorithm.
@@ -49,10 +101,8 @@ class AdaptiveParareal:
         self,
         prompts: List[str],
         coarse_num_inference_steps: int,
-        fine_num_inference_steps: int,
-        fine_num_inference_steps_sub: int,
+        fine_steps_schedule: List[Tuple[int, int]],
         tolerance: float,
-        adaptive: int,
         guidance_scale: float = 7.5,
         height: int = 512,
         width: int = 512,
@@ -62,42 +112,52 @@ class AdaptiveParareal:
         # Load pipeline if needed
         self._load_pipeline()
 
-        if fine_num_inference_steps % coarse_num_inference_steps != 0:
-            raise ValueError(
-                "The fine num inference steps must be a multiple of the coarse num inference steps"
-            )
+        # Validate schedule
+        if not fine_steps_schedule:
+            raise ValueError("fine_steps_schedule cannot be empty")
 
+        # Validate all fine steps are multiples of coarse steps
+        for num_steps, _ in fine_steps_schedule:
+            if num_steps % coarse_num_inference_steps != 0:
+                raise ValueError(
+                    f"Fine steps {num_steps} must be a multiple of coarse steps {coarse_num_inference_steps}"
+                )
+
+        # Create coarse scheduler
         scheduler_coarse = DDIMScheduler.from_pretrained(
             self.model_id, subfolder="scheduler", timestep_spacing="trailing"
         )
-        scheduler_fine = DDIMScheduler.from_pretrained(
-            self.model_id, subfolder="scheduler", timestep_spacing="trailing"
-        )
-        scheduler_fine_sub = DDIMScheduler.from_pretrained(
-            self.model_id, subfolder="scheduler", timestep_spacing="trailing"
-        )
         scheduler_coarse.set_timesteps(coarse_num_inference_steps)
-        scheduler_fine.set_timesteps(fine_num_inference_steps)
-        scheduler_fine_sub.set_timesteps(fine_num_inference_steps_sub)
-
         coarse_timesteps = scheduler_coarse.timesteps
-        fine_timesteps = scheduler_fine.timesteps
-        fine_timesteps_sub = scheduler_fine_sub.timesteps
-        if not (
-            all(t in fine_timesteps for t in coarse_timesteps)
-            and all(t in fine_timesteps_sub for t in coarse_timesteps)
-        ):
-            raise ValueError("The coarse timesteps are not a subset of the fine timesteps")
 
-        # Timestep setup
-        get_logger().info("SRDS Algorithm Configuration:")
+        # Create schedulers for each unique step count in the schedule
+        unique_steps = list(set(num_steps for num_steps, _ in fine_steps_schedule))
+        schedulers_fine = {}
+
+        for num_steps in unique_steps:
+            scheduler = DDIMScheduler.from_pretrained(
+                self.model_id, subfolder="scheduler", timestep_spacing="trailing"
+            )
+            scheduler.set_timesteps(num_steps)
+            schedulers_fine[num_steps] = scheduler
+
+            # Validate that coarse timesteps are subset of fine timesteps
+            fine_timesteps = scheduler.timesteps
+            if not all(t in fine_timesteps for t in coarse_timesteps):
+                raise ValueError(
+                    f"Coarse timesteps are not a subset of fine timesteps for {num_steps} steps"
+                )
+
+        # Calculate total iterations from schedule
+        total_iterations = sum(num_iters for _, num_iters in fine_steps_schedule)
+
+        # Log configuration
+        get_logger().info("Adaptive Parareal Algorithm Configuration:")
         get_logger().info(
             f"  Coarse steps: {len(coarse_timesteps)} | timesteps: {coarse_timesteps}"
         )
-        get_logger().info(f"  Fine steps: {len(fine_timesteps)} | timesteps: {fine_timesteps}")
-        get_logger().info(
-            f"  Fine steps2: {len(fine_timesteps_sub)} | timesteps: {fine_timesteps_sub}"
-        )
+        get_logger().info(f"  Fine steps schedule: {fine_steps_schedule}")
+        get_logger().info(f"  Total iterations: {total_iterations}")
         # Create a copy of the pipeline with the coarse scheduler
         pipe_coarse = StableDiffusionPipeline(
             vae=self.pipe.vae,
@@ -135,12 +195,13 @@ class AdaptiveParareal:
             generator,
         )
 
-        # Store ground truth DDIM trajectory in fine pipeline
+        # Store ground truth DDIM trajectory using the finest resolution in schedule
+        max_fine_steps = max(num_steps for num_steps, _ in fine_steps_schedule)
         gt_trajectory = self._compute_gt_trajectory(
             initial_latents,
-            fine_num_inference_steps,
+            max_fine_steps,
             coarse_timesteps,
-            scheduler_fine,
+            schedulers_fine[max_fine_steps],
             prompt_embeds,
             pipe_coarse.unet,
             guidance_scale,
@@ -205,18 +266,27 @@ class AdaptiveParareal:
         prev_images: Optional[List[Image.Image]] = (
             None  # Previous final image for L1 convergence check
         )
+
+        # Build iteration schedule: expand schedule to get fine steps for each iteration
+        iteration_fine_steps = []
+        for num_steps, num_iters in fine_steps_schedule:
+            iteration_fine_steps.extend([num_steps] * num_iters)
+
         for srds_iter in tqdm(
-            range(coarse_num_inference_steps), desc="SRDS Iterations"
+            range(total_iterations), desc="Adaptive Parareal Iterations"
         ):  # line 6 of Algorithm 1
             # cur_fine_prediction starts from prev_corrected_solution
             for i in range(1, coarse_num_inference_steps + 1):
                 cur_fine_prediction[i] = prev_corrected_solution[i - 1].clone()
 
-            get_tqdm_logger().write(f"SRDS Iteration {srds_iter + 1} - Processing fine steps")
-            if srds_iter < adaptive:
-                cur_scheduler_fine = scheduler_fine_sub
-            else:
-                cur_scheduler_fine = scheduler_fine
+            # Get fine steps for this iteration from schedule
+            current_fine_steps = iteration_fine_steps[srds_iter]
+            cur_scheduler_fine = schedulers_fine[current_fine_steps]
+
+            get_tqdm_logger().write(
+                f"Adaptive Parareal Iteration {srds_iter + 1}/{total_iterations} "
+                f"- Processing fine steps (using {current_fine_steps} steps)"
+            )
 
             for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 timestep_start = coarse_timesteps[i - 1]
@@ -233,7 +303,10 @@ class AdaptiveParareal:
                     do_classifier_free_guidance=do_classifier_free_guidance,
                 )
 
-            get_tqdm_logger().write(f"SRDS Iteration {srds_iter + 1} - Processing coarse sweep")
+            get_tqdm_logger().write(
+                f"Adaptive Parareal Iteration {srds_iter + 1}/{total_iterations} "
+                f"- Processing coarse sweep"
+            )
             for i in range(1, coarse_num_inference_steps + 1):  # line 9 of Algorithm 1
                 cur_coarse_prediction[i] = diffusion_step(  # line 10 of Algorithm 1
                     cur_corrected_solution[i - 1],
@@ -262,9 +335,9 @@ class AdaptiveParareal:
 
             # Save final images of every iteration
             images = decode_latents_to_pil(cur_corrected_solution[-1], pipe_coarse)
-            save_images_as_grid(images, f"{output_dir}/srds_iteration_{srds_iter}.png")
+            save_images_as_grid(images, f"{output_dir}/adaptive_parareal_iteration_{srds_iter}.png")
 
-            # Check convergence (line 13-14 of Algorithm 1)
+            # Log convergence metric (but don't stop early - run full schedule)
             if prev_images is not None:
                 l1_distance = np.average(
                     np.abs(
@@ -273,8 +346,8 @@ class AdaptiveParareal:
                 )
                 status = "CONVERGED" if l1_distance < tolerance else "continuing"
                 get_tqdm_logger().write(
-                    f"SRDS Iteration {srds_iter + 1}: L1={l1_distance:.6f} "
-                    f"(tolerance={tolerance}) - {status}"
+                    f"Adaptive Parareal Iteration {srds_iter + 1}/{total_iterations}: "
+                    f"L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
                 )
 
                 if l1_distance < tolerance:
@@ -303,8 +376,9 @@ class AdaptiveParareal:
             np.abs(np.array(gt_images, dtype=np.float32) - np.array(images, dtype=np.float32))
         )
         get_logger().info(
-            f"SRDS Complete: Final L1 distance from DDIM ground truth = {l1_distance:.6f}"
+            f"Adaptive Parareal Complete: Final L1 distance from DDIM ground truth = {l1_distance:.6f}"
         )
+        get_logger().info(f"Completed all {total_iterations} iterations as specified in schedule")
 
         return images
 
@@ -365,10 +439,10 @@ class AdaptiveParareal:
             latents=initial_latents,
         )
 
-        save_images_as_grid(coarse_output.images, f"{output_dir}/srds_ddim_coarse.png")
+        save_images_as_grid(coarse_output.images, f"{output_dir}/adaptive_parareal_ddim_coarse.png")
 
         initialized_images = decode_latents_to_pil(final_latents, pipe_coarse)
-        save_images_as_grid(initialized_images, f"{output_dir}/srds_initialized.png")
+        save_images_as_grid(initialized_images, f"{output_dir}/adaptive_parareal_initialized.png")
 
         if len(coarse_output.images) == len(initialized_images) and all(
             coarse_img.tobytes() == init_img.tobytes()
@@ -393,10 +467,10 @@ class AdaptiveParareal:
     ) -> None:
         """Save final outputs and analysis"""
         # Save the final image
-        save_images_as_grid(images, f"{output_dir}/srds_final.png")
+        save_images_as_grid(images, f"{output_dir}/adaptive_parareal_final.png")
 
         # Save ground truth
-        save_images_as_grid(gt_images, f"{output_dir}/srds_ddim_gt.png")
+        save_images_as_grid(gt_images, f"{output_dir}/adaptive_parareal_ddim_gt.png")
 
         # Save trajectory errors to CSV
         if gt_trajectory_errors:
