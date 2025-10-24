@@ -211,8 +211,13 @@ class AdaptiveParareal:
                 "- Processing fine steps"
             )
             
+            
+            if srds_iter < adaptive:
+                iter_scheduler_fine = scheduler_fine_sub
+            else:
+                iter_scheduler_fine = scheduler_fine
 
-            for i in range(1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
+            for i in range(srds_iter + 1, coarse_num_inference_steps + 1):  # line 7 of Algorithm 1
                 # Scheduling pattern:
                 # srds_iter=0: fine, fine_sub, fine_sub, ...
                 # srds_iter=1: fine, fine, fine_sub, fine_sub, ...
@@ -220,11 +225,7 @@ class AdaptiveParareal:
                 if i <= srds_iter + 1:
                     cur_scheduler_fine = scheduler_fine
                 else:
-                    if srds_iter < adaptive:
-                        cur_scheduler_fine = scheduler_fine_sub
-                    else:
-                        cur_scheduler_fine = scheduler_fine
-
+                    cur_scheduler_fine = iter_scheduler_fine
 
                 timestep_start = coarse_timesteps[i - 1]
                 timestep_end = coarse_timesteps[i] if i < coarse_num_inference_steps else -1
