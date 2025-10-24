@@ -350,9 +350,6 @@ class AdaptiveParareal:
                     f"L1={l1_distance:.6f} (tolerance={tolerance}) - {status}"
                 )
 
-                if l1_distance < tolerance:
-                    break
-
             # Update previous solutions (line 12 of Algorithm 1)
             prev_coarse_prediction[:] = cur_coarse_prediction
             prev_fine_prediction[:] = cur_fine_prediction
