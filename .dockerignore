@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Output directories
+output/
+*.png
+*.jpg
+*.jpeg
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+log.txt
+
+# Model weights and checkpoints (usually large)
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+
+# OS
+.DS_Store
+Thumbs.db
