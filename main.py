@@ -66,6 +66,14 @@ def parse_args():
     parser.add_argument(
         "--tolerance", "-tol", type=float, default=0.1, help="Convergence tolerance"
     )
+    # EXPERIMENTAL: Alternative initialization strategy (not part of standard SRDS)
+    parser.add_argument(
+        "--init-steps",
+        "-is",
+        type=int,
+        default=None,
+        help="EXPERIMENTAL: Number of initialization inference steps for testing",
+    )
 
     # Algorithm selection
     parser.add_argument(
@@ -79,14 +87,11 @@ def parse_args():
 
     # Adaptive Parareal
     parser.add_argument(
-        "--adaptive", "-ad", type=int, default=0, help="Adaptive schedule for adaptive Parareal"
-    )
-    parser.add_argument(
-        "--fine-steps2",
-        "-fs2",
-        type=int,
+        "--fine-steps-schedule",
+        "-fss",
+        type=str,
         default=None,
-        help="Number of fine inference steps",
+        help="Fine steps schedule for adaptive Parareal (format: '32x3,64x2,128x10')",
     )
 
     # Stochastic Parareal
@@ -142,11 +147,15 @@ def create_main_subdir(base_output_dir, timestamp, args):
             f"{args.sample_type}-ns{args.num_samples}"
         )
     elif args.algorithm == "srds":
-        subdir_name = f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
-    elif args.algorithm == "adaptive":
         subdir_name = (
-            f"{timestamp}_adaptive-para_cs{args.coarse_steps}-fs2{args.fine_steps2}-"
-            f"fs{args.fine_steps}-ad{args.adaptive}"
+            f"{timestamp}_srds_cs{args.coarse_steps}-fs{args.fine_steps}"
+            f"{f'-is{args.init_steps}' if args.init_steps is not None else ''}"
+        )
+    elif args.algorithm == "adaptive":
+        # Format schedule for directory name: "32x3,64x2" -> "32x3-64x2"
+        schedule_str = args.fine_steps_schedule.replace(',', '-')
+        subdir_name = (
+            f"{timestamp}_adaptive-para_cs{args.coarse_steps}_sched-{schedule_str}"
         )
     else:
         raise ValueError(f"Unknown algorithm: {args.algorithm}")
@@ -199,6 +208,7 @@ if __name__ == "__main__":
     log_info(f"Prompts: {args.prompts}")
     log_info(f"Coarse steps: {args.coarse_steps}")
     log_info(f"Fine steps: {args.fine_steps}")
+    log_info(f"Init steps: {args.init_steps}")  # EXPERIMENTAL parameter
     log_info(f"Tolerance: {args.tolerance}")
     log_info(f"Seed: {args.seed}")
     log_info(f"Model: {args.model}")
@@ -237,7 +247,9 @@ if __name__ == "__main__":
             "prompt_idx": prompt_idx,
             "algorithm": args.algorithm,
             "coarse_steps": args.coarse_steps,
-            "fine_steps": args.fine_steps,
+            "fine_steps": args.fine_steps if args.algorithm != "adaptive" else None,
+            "fine_steps_schedule": args.fine_steps_schedule if args.algorithm == "adaptive" else None,
+            "init_steps": args.init_steps,
             "tolerance": args.tolerance,
             "guidance_scale": args.guidance_scale,
             "sample_type": args.sample_type,
@@ -261,6 +273,7 @@ if __name__ == "__main__":
                 coarse_num_inference_steps=args.coarse_steps,
                 fine_num_inference_steps=args.fine_steps,
                 tolerance=args.tolerance,
+                init_num_inference_steps=args.init_steps,  # EXPERIMENTAL
                 guidance_scale=args.guidance_scale,
                 height=args.height,
                 width=args.width,
@@ -314,20 +327,23 @@ if __name__ == "__main__":
                 reward_scorer=args.reward_scorer,
             )
         elif args.algorithm == "adaptive":
-            if args.fine_steps2 is None:
+            if args.fine_steps_schedule is None:
                 raise ValueError(
-                    "fine_steps2 must be specified when using AdaptivePrareal algorithm"
+                    "fine_steps_schedule must be specified when using Adaptive Parareal algorithm"
                 )
+
+            # Import and parse the schedule
+            from src.adaptiveparareal import parse_fine_steps_schedule
+            fine_steps_schedule = parse_fine_steps_schedule(args.fine_steps_schedule)
+
             log_info("Initializing Adaptive Parareal algorithm...")
             algorithm = AdaptiveParareal(model_id=args.model)
             log_info("Running Adaptive Parareal...")
             images = algorithm(
                 prompts=[prompt],  # Single prompt
                 coarse_num_inference_steps=args.coarse_steps,
-                fine_num_inference_steps=args.fine_steps,
-                fine_num_inference_steps_sub=args.fine_steps2,
+                fine_steps_schedule=fine_steps_schedule,
                 tolerance=args.tolerance,
-                adaptive=args.adaptive,
                 guidance_scale=args.guidance_scale,
                 height=args.height,
                 width=args.width,
