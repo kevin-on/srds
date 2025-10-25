@@ -6,6 +6,32 @@ This repository provides an unofficial implementation of the SRDS algorithm desc
 
 📄 **Paper**: [Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations](https://arxiv.org/abs/2412.08292)
 
+## Docker Deployment
+
+### Using Pre-built Image on VESSL.AI
+
+A Docker image with all dependencies is automatically built via GitHub Actions and pushed to Docker Hub:
+
+**Docker Hub repository**: `kevin0n/srds:latest`
+
+Use this image directly in VESSL.AI's custom image settings - no setup required!
+
+### Building Docker Image
+
+Trigger a new build to update the Docker Hub image:
+
+**Option 1: GitHub CLI**
+```bash
+gh workflow run docker-build.yml
+```
+
+**Option 2: GitHub Web UI**
+1. Go to repository **Actions** tab
+2. Select **Build and Push Docker Image** workflow
+3. Click **Run workflow** → Select branch → **Run workflow**
+
+The workflow automatically builds and pushes the updated image to `kevin0n/srds:latest` on Docker Hub.
+
 ## Project Structure
 
 ```
