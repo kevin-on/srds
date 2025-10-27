@@ -51,6 +51,7 @@ class SRDS:
         coarse_num_inference_steps: int,
         fine_num_inference_steps: int,
         tolerance: float,
+        init_num_inference_steps: Optional[int] = None,  # EXPERIMENTAL: alternative init
         guidance_scale: float = 7.5,
         height: int = 512,
         width: int = 512,
@@ -73,6 +74,16 @@ class SRDS:
         )
         scheduler_coarse.set_timesteps(coarse_num_inference_steps)
         scheduler_fine.set_timesteps(fine_num_inference_steps)
+
+        # EXPERIMENTAL: Alternative initialization using a different number of steps
+        # This is not part of the standard SRDS algorithm
+        if init_num_inference_steps is not None:
+            scheduler_init = DDIMScheduler.from_pretrained(
+                self.model_id, subfolder="scheduler", timestep_spacing="trailing"
+            )
+            scheduler_init.set_timesteps(init_num_inference_steps)
+        else:
+            scheduler_init = None
 
         coarse_timesteps = scheduler_coarse.timesteps
         fine_timesteps = scheduler_fine.timesteps
@@ -160,29 +171,58 @@ class SRDS:
         ]  # U_{k+1}^n
 
         # Initialize previous solutions
-        for i in range(1, coarse_num_inference_steps + 1):  # line 2 of Algorithm 1
-            prev_coarse_prediction[i] = diffusion_step(  # line 3 of Algorithm 1
-                prev_coarse_prediction[i - 1],
-                coarse_timesteps[i - 1],
-                prompt_embeds,
-                pipe_coarse.unet,
-                scheduler_coarse,
+        if scheduler_init is not None:
+            # EXPERIMENTAL: Use alternative initialization scheduler if provided
+            for i in range(1, coarse_num_inference_steps + 1):
+                timestep_start = coarse_timesteps[i - 1]
+                timestep_end = coarse_timesteps[i] if i < coarse_num_inference_steps else -1
+                prev_corrected_solution[i] = diffusion_step(
+                    latents=prev_corrected_solution[i - 1],
+                    timestep=timestep_start,
+                    timestep_end=timestep_end,
+                    prompt_embeds=prompt_embeds,
+                    unet=pipe_coarse.unet,
+                    scheduler=scheduler_init,
+                    guidance_scale=guidance_scale,
+                    do_classifier_free_guidance=do_classifier_free_guidance,
+                )
+
+            for i in range(1, coarse_num_inference_steps + 1):
+                prev_coarse_prediction[i] = diffusion_step(
+                    prev_corrected_solution[i - 1],
+                    coarse_timesteps[i - 1],
+                    prompt_embeds,
+                    pipe_coarse.unet,
+                    scheduler_init if scheduler_init is not None else scheduler_coarse,
+                    guidance_scale,
+                    do_classifier_free_guidance,
+                )
+
+        else:
+            # This is the standard SRDS algorithm
+            for i in range(1, coarse_num_inference_steps + 1):  # line 2 of Algorithm 1
+                prev_coarse_prediction[i] = diffusion_step(  # line 3 of Algorithm 1
+                    prev_coarse_prediction[i - 1],
+                    coarse_timesteps[i - 1],
+                    prompt_embeds,
+                    pipe_coarse.unet,
+                    scheduler_coarse,
+                    guidance_scale,
+                    do_classifier_free_guidance,
+                )
+
+            # line 4 of Algorithm 1
+            prev_corrected_solution = [x.clone() for x in prev_coarse_prediction]
+
+            self._sanity_check_initialization(
+                pipe_coarse,
+                prompts,
+                coarse_num_inference_steps,
                 guidance_scale,
-                do_classifier_free_guidance,
+                initial_latents,
+                prev_corrected_solution[-1],
+                output_dir,
             )
-
-        # line 4 of Algorithm 1
-        prev_corrected_solution = [x.clone() for x in prev_coarse_prediction]
-
-        self._sanity_check_initialization(
-            pipe_coarse,
-            prompts,
-            coarse_num_inference_steps,
-            guidance_scale,
-            initial_latents,
-            prev_corrected_solution[-1],
-            output_dir,
-        )
 
         gt_trajectory_errors: List[
             List[float]
@@ -228,7 +268,7 @@ class SRDS:
                     coarse_timesteps[i - 1],
                     prompt_embeds,
                     pipe_coarse.unet,
-                    scheduler_coarse,
+                    scheduler_init if scheduler_init is not None else scheduler_coarse,
                     guidance_scale,
                     do_classifier_free_guidance,
                 )

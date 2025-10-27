@@ -6,6 +6,75 @@ This repository provides an unofficial implementation of the SRDS algorithm desc
 
 📄 **Paper**: [Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations](https://arxiv.org/abs/2412.08292)
 
+## Docker Deployment
+
+### Using Pre-built Image on VESSL.AI
+
+A Docker image with all dependencies is automatically built via GitHub Actions and pushed to Docker Hub:
+
+**Docker Hub repository**: `kevin0n/srds:latest`
+
+Use this image directly in VESSL.AI's custom image settings - no setup required!
+
+### Building Docker Image
+
+Trigger a new build to update the Docker Hub image:
+
+**Option 1: GitHub CLI**
+```bash
+gh workflow run docker-build.yml
+```
+
+**Option 2: GitHub Web UI**
+1. Go to repository **Actions** tab
+2. Select **Build and Push Docker Image** workflow
+3. Click **Run workflow** → Select branch → **Run workflow**
+
+The workflow automatically builds and pushes the updated image to `kevin0n/srds:latest` on Docker Hub.
+
+### Example VESSL AI Run Configuration
+
+Below is an example VESSL AI run configuration for running parallel experiments on multiple GPUs:
+
+```yaml
+name: adaptive-fs256
+import:
+  /root/code/:
+    git:
+      url: github.com/kevin-on/srds.git
+      ref: kevin/adaptive-parareal
+export:
+  /root/output/: volume://vessl-storage
+resources:
+  cluster: snu-cvlab
+  preset: 4gpu-a6000
+  node_names:
+    - cvlab14
+    - cvlab16
+    - cvlab17
+    - cvlab18
+    - cvlab19
+image: kevin0n/srds:latest
+run:
+  - command: |-
+      CUDA_VISIBLE_DEVICES=0 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "256x16" &
+      CUDA_VISIBLE_DEVICES=1 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "32x1,256x16" &
+      CUDA_VISIBLE_DEVICES=2 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "32x2,256x16" &
+      CUDA_VISIBLE_DEVICES=3 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "32x4,256x16" &
+
+      wait
+    workdir: /root/code
+```
+
+**Key Points:**
+- **Use the pre-built Docker image**: `kevin0n/srds:latest` contains all dependencies
+- **Import and export paths must be different** to avoid mount conflicts (e.g., `/root/code/` for code, `/root/output/` for results)
+- **Parallel execution**: Use `&` to run commands in background and `wait` to ensure all processes complete before the run finishes
+- **Download output files** after the run completes:
+  ```bash
+  vessl storage copy-file volume://my-storage/my-volume ./local-directory
+  ```
+
 ## Project Structure
 
 ```
