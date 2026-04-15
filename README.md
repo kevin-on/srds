@@ -1,178 +1,299 @@
 # Self-Refining Diffusion Samplers (SRDS)
 
-**Unofficial PyTorch Implementation of "Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations"**
+Unofficial PyTorch implementation of
+["Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations"](https://arxiv.org/abs/2412.08292),
+with additional experiments around adaptive and stochastic Parareal variants for text-to-image diffusion.
 
-This repository provides an unofficial implementation of the SRDS algorithm described in the NeurIPS 2024 paper by Nikil Roashan Selvam, Amil Merchant, and Stefano Ermon.
+This repository started from reproducing SRDS without an official code release and then grew into a research codebase for:
 
-📄 **Paper**: [Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations](https://arxiv.org/abs/2412.08292)
+- baseline `SRDS` reproduction on top of Stable Diffusion + DDIM
+- `AdaptiveParareal` with a scheduled fine-solver budget
+- `StochasticParareal` with multiple candidate trajectory generation strategies
+- `SPararealTTS`, a reward-guided variant using PickScore
+- experiment logging, sweeps, convergence analysis, and lightweight result visualization
 
-## Docker Deployment
+The code is research-oriented rather than a polished package. The goal here is to make the implemented ideas and experiment flow explicit.
 
-### Using Pre-built Image on VESSL.AI
+## Paper
 
-A Docker image with all dependencies is automatically built via GitHub Actions and pushed to Docker Hub:
+- Paper: [Self-Refining Diffusion Samplers: Enabling Parallelization via Parareal Iterations](https://arxiv.org/abs/2412.08292)
+- Original authors: Nikil Roashan Selvam, Amil Merchant, Stefano Ermon
 
-**Docker Hub repository**: `kevin0n/srds:latest`
+## What I Implemented Here
 
-Use this image directly in VESSL.AI's custom image settings - no setup required!
+Beyond a straight paper reproduction, this repo includes:
 
-### Building Docker Image
+1. A full PyTorch reproduction of `SRDS` in `src/srds.py`, using Stable Diffusion and DDIM schedulers.
+2. An `AdaptiveParareal` variant in `src/adaptiveparareal.py` that supports fine-step schedules such as `32x1,64x2,256x8`.
+3. A `StochasticParareal` variant in `src/sparareal.py` that samples multiple candidate trajectory segments and selects among them.
+4. A reward-guided variant in `src/spararealtts.py` that uses PickScore for final-step selection.
+5. Supporting experiment infrastructure:
+   - prompt-file or single-prompt execution
+   - timestamped output folders and per-prompt configs
+   - parameter sweeps
+   - sequential DDIM baseline
+   - convergence plots, HTML galleries, and simple local serving
+6. Docker and VESSL-oriented workflow for running large batches on multiple GPUs.
 
-Trigger a new build to update the Docker Hub image:
+## Repository Layout
 
-**Option 1: GitHub CLI**
-```bash
-gh workflow run docker-build.yml
+```text
+srds/
+├── main.py                     # Main entry point for SRDS / SParareal / AdaptiveParareal / SPararealTTS
+├── sequential.py               # Sequential DDIM baseline
+├── sweep.py                    # Parameter sweep runner
+├── src/
+│   ├── srds.py                 # SRDS reproduction
+│   ├── adaptiveparareal.py     # Adaptive Parareal extension
+│   ├── sparareal.py            # Stochastic Parareal extension
+│   ├── spararealtts.py         # Reward-guided stochastic Parareal
+│   ├── diffusion.py            # Shared diffusion step utilities
+│   └── reward/
+│       ├── pickscore.py        # PickScore scorer
+│       └── clip_score.py       # CLIP-based scorer
+├── utils/
+│   ├── logger.py               # Console/file logging
+│   ├── metrics.py              # Sweep/result summaries
+│   └── utils.py                # Image grids, prompt parsing helpers
+├── evals/
+│   ├── analyze_convergence.py  # Iteration-wise convergence analysis
+│   ├── image_quality.py        # PickScore / CLIP-based image scoring
+│   ├── generate_html_gallery.py # HTML gallery generation
+│   └── serve_local.py          # Simple local HTTP server for galleries
+├── prompts/
+│   ├── 1.txt
+│   ├── 3.txt
+│   ├── 10.txt
+│   └── 100.txt
+├── requirements.txt
+├── dev-requirements.txt
+├── Dockerfile
+└── pyproject.toml
 ```
 
-**Option 2: GitHub Web UI**
-1. Go to repository **Actions** tab
-2. Select **Build and Push Docker Image** workflow
-3. Click **Run workflow** → Select branch → **Run workflow**
+## Setup
 
-The workflow automatically builds and pushes the updated image to `kevin0n/srds:latest` on Docker Hub.
+### Python environment
 
-### Example VESSL AI Run Configuration
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
 
-Below is an example VESSL AI run configuration for running parallel experiments on multiple GPUs:
+### Dependencies
+
+Core dependencies are:
+
+- `torch`
+- `diffusers`
+- `transformers`
+- `accelerate`
+- `xformers`
+- `pandas`
+- `matplotlib`
+
+The default backend in the current scripts is `stabilityai/stable-diffusion-2`.
+
+## Running Experiments
+
+The main entry point is `main.py`. `--prompts` can be either:
+
+- a text file with one prompt per line, or
+- a single prompt string
+
+### 1. SRDS reproduction
+
+```bash
+python main.py \
+  -p prompts/1.txt \
+  -o output/srds \
+  -a srds \
+  -cs 16 \
+  -fs 256
+```
+
+Optional experimental initialization:
+
+```bash
+python main.py \
+  -p prompts/1.txt \
+  -o output/srds_init \
+  -a srds \
+  -cs 16 \
+  -fs 256 \
+  -is 64
+```
+
+### 2. Adaptive Parareal
+
+`AdaptiveParareal` takes a fine-step schedule of the form `steps x iterations`.
+
+```bash
+python main.py \
+  -p prompts/3.txt \
+  -o output/adaptive \
+  -a adaptive \
+  -cs 16 \
+  -fss "32x2,64x2,256x8"
+```
+
+### 3. Stochastic Parareal
+
+The stochastic variant generates multiple candidates per coarse segment.
+
+DDIM-style stochasticity:
+
+```bash
+python main.py \
+  -p prompts/3.txt \
+  -o output/sparareal_ddim \
+  -a sparareal \
+  -cs 16 \
+  -fs 256 \
+  -ns 5 \
+  -st "ddim,eta=0.5"
+```
+
+Directional perturbation:
+
+```bash
+python main.py \
+  -p prompts/3.txt \
+  -o output/sparareal_dir \
+  -a sparareal \
+  -cs 16 \
+  -fs 256 \
+  -ns 5 \
+  -st "dir,scale=0.2"
+```
+
+### 4. Reward-guided SParareal
+
+```bash
+python main.py \
+  -p prompts/1.txt \
+  -o output/sparatts \
+  -a sparatts \
+  -cs 16 \
+  -fs 256 \
+  -ns 5 \
+  -st "ddim,eta=0.5" \
+  -rs pickscore
+```
+
+### 5. Sequential DDIM baseline
+
+```bash
+python sequential.py \
+  -p prompts/1.txt \
+  -o output/sequential \
+  --steps 256
+```
+
+## Parameter Sweeps
+
+`sweep.py` runs batched experiments for `srds` or `sparareal`.
+
+```bash
+python sweep.py \
+  --prompt "a cinematic photo of a red sports car at sunset" \
+  -o output/sweeps \
+  -a sparareal \
+  --coarse-steps 16 \
+  --fine-steps 128 256 \
+  --num-samples 3 5 \
+  --sample-type "ddim,eta=0.1" "ddim,eta=0.5" \
+  --tolerance 0.05 0.1
+```
+
+## Output Structure
+
+Each run creates a timestamped experiment directory and then one subdirectory per prompt.
+
+Typical contents of each prompt folder include:
+
+```text
+prompt0_example_prompt/
+├── config.json
+├── log.txt
+├── srds_ddim_coarse.png
+├── srds_initialized.png
+├── srds_iteration_0.png
+├── ...
+├── srds_final.png
+├── srds_ddim_gt.png
+├── _gt_trajectory_errors_table.csv
+├── _gt_trajectory_errors_plot.png
+├── _trajectory_convergences_table.csv
+└── _trajectory_convergences_plot.png
+```
+
+Adaptive Parareal uses `adaptive_parareal_*` filenames instead of `srds_*`.
+
+## Analysis Utilities
+
+### Convergence analysis
+
+```bash
+python evals/analyze_convergence.py --folder output
+```
+
+### Image scoring across iterations
+
+PickScore:
+
+```bash
+python evals/image_quality.py --folder output --metric pickscore
+```
+
+CLIP:
+
+```bash
+python evals/image_quality.py --folder output --metric clip
+```
+
+### HTML gallery generation
+
+```bash
+python evals/generate_html_gallery.py --folder output
+```
+
+### Serve results locally
+
+```bash
+python evals/serve_local.py output --port 8000 --open
+```
+
+## Docker / VESSL Workflow
+
+This repo also includes a Docker/VESSL-oriented workflow for larger runs.
+
+- Docker image: `kevin0n/srds:latest`
+- Dockerfile: `Dockerfile`
+
+Example VESSL command block:
 
 ```yaml
-name: adaptive-fs256
-import:
-  /root/code/:
-    git:
-      url: github.com/kevin-on/srds.git
-      ref: kevin/adaptive-parareal
-export:
-  /root/output/: volume://vessl-storage
-resources:
-  cluster: snu-cvlab
-  preset: 4gpu-a6000
-  node_names:
-    - cvlab14
-    - cvlab16
-    - cvlab17
-    - cvlab18
-    - cvlab19
-image: kevin0n/srds:latest
 run:
   - command: |-
-      CUDA_VISIBLE_DEVICES=0 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "256x16" &
-      CUDA_VISIBLE_DEVICES=1 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "32x1,256x16" &
-      CUDA_VISIBLE_DEVICES=2 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "32x2,256x16" &
-      CUDA_VISIBLE_DEVICES=3 python main.py -p prompts/3.txt -o /root/output/adaptive-256 -a adaptive -cs 16 -fss "32x4,256x16" &
-
+      CUDA_VISIBLE_DEVICES=0 python main.py -p prompts/3.txt -o /root/output/adaptive -a adaptive -cs 16 -fss "32x1,256x16" &
+      CUDA_VISIBLE_DEVICES=1 python main.py -p prompts/3.txt -o /root/output/adaptive -a adaptive -cs 16 -fss "32x2,256x16" &
+      CUDA_VISIBLE_DEVICES=2 python main.py -p prompts/3.txt -o /root/output/adaptive -a adaptive -cs 16 -fss "32x4,256x16" &
+      CUDA_VISIBLE_DEVICES=3 python main.py -p prompts/3.txt -o /root/output/adaptive -a adaptive -cs 16 -fss "32x8,256x16" &
       wait
     workdir: /root/code
 ```
 
-**Key Points:**
-- **Use the pre-built Docker image**: `kevin0n/srds:latest` contains all dependencies
-- **Import and export paths must be different** to avoid mount conflicts (e.g., `/root/code/` for code, `/root/output/` for results)
-- **Parallel execution**: Use `&` to run commands in background and `wait` to ensure all processes complete before the run finishes
-- **Download output files** after the run completes:
-  ```bash
-  vessl storage copy-file volume://my-storage/my-volume ./local-directory
-  ```
+## Notes
 
-## Project Structure
-
-```
-srds/
-├── src/                    # Core algorithms
-│   ├── srds.py            # SRDS algorithm implementation
-│   ├── sparareal.py       # SParareal algorithm implementation
-│   └── diffusion.py       # Diffusion step functions
-├── scripts/                # Execution scripts
-│   ├── main.py            # Main execution script
-│   ├── sweep.py           # Parameter sweep script
-│   └── run_sweep_example.sh # Sweep example
-├── utils/                  # Utilities
-│   ├── utils.py           # Image processing utilities
-│   └── logger.py          # Logging utilities
-└── output/                # Experiment results
-```
-
-## Usage
-
-### Basic Usage
-
-Run SRDS with a text file containing prompts (one per line):
-
-```bash
-python scripts/main.py --prompts example_prompts.txt --output-dir output/my_experiment
-```
-
-Or run with a single direct prompt:
-
-```bash
-python scripts/main.py --prompts "a beautiful landscape with mountains and a lake" --output-dir output/single_test
-```
-
-### Parameter Sweep
-
-Run parameter sweep for a single prompt:
-
-```bash
-python scripts/sweep.py \
-    --prompt "a beautiful landscape with mountains and a lake" \
-    --output-dir "./output/sweeps" \
-    --algorithm sparareal \
-    --coarse-steps 5 10 15 \
-    --fine-steps 50 100 150 \
-    --num-samples 1 5 10 \
-    --eta 0.01 0.1 1.0 \
-    --tolerance 0.01 0.05 0.1
-```
-
-### Command Line Arguments
-
-#### Required Arguments
-- `--prompts`, `-p`: Path to text file with prompts (one per line) OR direct prompt string
-- `--output-dir`, `-o`: Output directory for generated images and analysis
-
-#### Algorithm Parameters
-- `--coarse-steps`, `-cs`: Number of coarse inference steps (default: 10)
-- `--fine-steps`, `-fs`: Number of fine inference steps (default: 100)
-- `--tolerance`, `-tol`: Convergence tolerance (default: 0.1)
-
-#### Generation Parameters  
-- `--guidance-scale`, `-gs`: Classifier-free guidance scale (default: 7.5)
-- `--height`: Image height in pixels (default: 512)
-- `--width`: Image width in pixels (default: 512)
-- `--seed`, `-s`: Random seed for reproducibility (default: 42)
-- `--model`: Hugging Face model ID (default: "stabilityai/stable-diffusion-2")
-
-## Output Structure
-
-The algorithm generates comprehensive outputs for analysis:
-
-```
-output/
-├── srds_ddim_course.png       # Coarse DDIM baseline
-├── srds_ddim_gt.png           # Fine DDIM ground truth  
-├── srds_initialized.png       # Initial trajectory
-├── srds_iteration_*.png       # Results from each SRDS iteration
-├── srds_final.png            # Final converged result
-├── trajectory_errors_plot.png # Convergence visualization
-└── trajectory_errors_table.csv # Numerical error data
-```
-
-## Implementation Details
-
-### Core Components
-
-- **`src/srds.py`**: Main SRDS algorithm implementation
-- **`src/sparareal.py`**: SParareal algorithm implementation
-- **`src/diffusion.py`**: Low-level diffusion step functions with batched/sequential variants
-- **`utils/utils.py`**: Utility functions for image processing and visualization
-- **`utils/logger.py`**: Logging utilities
-- **`scripts/main.py`**: Command-line interface and experiment runner
-- **`scripts/sweep.py`**: Parameter sweep functionality
+- This repository is not the official SRDS release.
+- Several scripts are exploratory research code and were written for running/inspecting experiments quickly.
+- The implementation is centered around text-to-image diffusion experiments rather than a general Parareal library.
 
 ## Citation
 
-If you use this implementation in your research, please cite the original paper:
+If you use this repository, please cite the original SRDS paper:
 
 ```bibtex
 @article{selvam2024self,
@@ -182,7 +303,3 @@ If you use this implementation in your research, please cite the original paper:
   year={2024}
 }
 ```
-
-## License
-
-This implementation is provided for research purposes. Please refer to the original paper and model licenses for usage terms.
